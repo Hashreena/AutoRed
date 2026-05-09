@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
+from gui.scan_wizard import ScanWizard
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -93,8 +94,21 @@ class MainWindow(QMainWindow):
         return sidebar
 
     def open_new_scan(self):
-        self.content_label.setText("New Scan")
-        self.content_sub.setText("Scan wizard coming in Day 11...")
+        wizard = ScanWizard(on_scan_start=self.handle_scan_start)
+        self.content_area.layout().addWidget(wizard)
+        old_label = self.content_area.findChild(QLabel, "welcomeLabel")
+        old_sub = self.content_area.findChild(QLabel, "subLabel")
+        if old_label:
+           old_label.hide()
+        if old_sub:
+           old_sub.hide()
+
+    def handle_scan_start(self, config):
+        from PyQt6.QtWidgets import QMessageBox
+        msg = QMessageBox()
+        msg.setWindowTitle("Scan Starting")
+        msg.setText(f"Starting scan for {config['target']}...")
+        msg.exec()
 
     def open_existing_scan(self):
         self.content_label.setText("Open Existing Scan")
