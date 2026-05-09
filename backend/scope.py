@@ -11,6 +11,7 @@ BLOCKLIST = [
 
 ALLOWLIST = [
     'scanme.nmap.org',
+    '192.168.112.130',
 ]
 
 def is_valid_domain(target):
@@ -54,7 +55,7 @@ def validate_target(target):
         }
 
     if is_valid_ip(target):
-        if is_private_ip(target):
+        if is_private_ip(target) and target not in ALLOWLIST:
             return {
                 'allowed': False,
                 'reason': f'Private IP addresses are not allowed: {target}'

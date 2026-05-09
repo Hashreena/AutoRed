@@ -104,11 +104,24 @@ class MainWindow(QMainWindow):
            old_sub.hide()
 
     def handle_scan_start(self, config):
+        from gui.scan_progress import ScanProgressScreen
+        self.clear_content()
+        progress = ScanProgressScreen(config, on_finished=self.view_findings)
+        self.content_area.layout().addWidget(progress)
+
+    def view_findings(self, scan_id):
         from PyQt6.QtWidgets import QMessageBox
         msg = QMessageBox()
-        msg.setWindowTitle("Scan Starting")
-        msg.setText(f"Starting scan for {config['target']}...")
+        msg.setWindowTitle("Scan Complete")
+        msg.setText(f"Scan {scan_id} complete! Findings dashboard coming in Day 13.")
         msg.exec()
+
+    def clear_content(self):
+        layout = self.content_area.layout()
+        while layout.count():
+            child = layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
 
     def open_existing_scan(self):
         self.content_label.setText("Open Existing Scan")
