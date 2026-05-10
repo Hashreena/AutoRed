@@ -119,11 +119,24 @@ class MainWindow(QMainWindow):
         self.content_area.layout().addWidget(dashboard)
 
     def show_finding_detail(self, finding):
-        from PyQt6.QtWidgets import QMessageBox
-        msg = QMessageBox()
-        msg.setWindowTitle("Finding Detail")
-        msg.setText(f"[{finding['severity']}] {finding['title']}\n\nDetail panel coming in Day 14.")
-        msg.exec()
+        from gui.finding_detail import FindingDetail
+        self.clear_content()
+        detail = FindingDetail(
+            finding=finding,
+            on_close=lambda: self.view_findings(self.current_scan_id),
+            on_status_change=lambda status: print(f"Status changed to {status}")
+        )
+        self.content_area.layout().addWidget(detail)
+
+    def view_findings(self, scan_id):
+        from gui.findings_dashboard import FindingsDashboard
+        self.current_scan_id = scan_id
+        self.clear_content()
+        dashboard = FindingsDashboard(
+            scan_id=scan_id,
+            on_finding_click=self.show_finding_detail
+        )
+        self.content_area.layout().addWidget(dashboard)
 
     def clear_content(self):
         layout = self.content_area.layout()
