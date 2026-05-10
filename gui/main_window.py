@@ -110,10 +110,19 @@ class MainWindow(QMainWindow):
         self.content_area.layout().addWidget(progress)
 
     def view_findings(self, scan_id):
+        from gui.findings_dashboard import FindingsDashboard
+        self.clear_content()
+        dashboard = FindingsDashboard(
+            scan_id=scan_id,
+            on_finding_click=self.show_finding_detail
+        )
+        self.content_area.layout().addWidget(dashboard)
+
+    def show_finding_detail(self, finding):
         from PyQt6.QtWidgets import QMessageBox
         msg = QMessageBox()
-        msg.setWindowTitle("Scan Complete")
-        msg.setText(f"Scan {scan_id} complete! Findings dashboard coming in Day 13.")
+        msg.setWindowTitle("Finding Detail")
+        msg.setText(f"[{finding['severity']}] {finding['title']}\n\nDetail panel coming in Day 14.")
         msg.exec()
 
     def clear_content(self):

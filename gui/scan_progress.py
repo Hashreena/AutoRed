@@ -55,11 +55,13 @@ class ScanWorker(QThread):
 
             output_dir = os.path.join(output_base, tool)
             result = run_tool(self.scan_id, tool, command, output_dir)
-
             status = result['status']
             if status == 'completed':
                 self.log_signal.emit(f"[+] {tool} finished successfully")
                 self.tool_done_signal.emit(tool, 'completed')
+                from backend.job_queue import parse_tool_output
+                parse_tool_output(self.scan_id, tool, result['stdout'], target)
+                self.log_signal.emit(f"[+] {tool} findings parsed and saved")
             else:
                 self.log_signal.emit(f"[-] {tool} failed — {status}")
                 self.tool_done_signal.emit(tool, 'failed')
