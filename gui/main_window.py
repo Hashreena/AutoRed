@@ -146,8 +146,12 @@ class MainWindow(QMainWindow):
                 child.widget().deleteLater()
 
     def open_existing_scan(self):
-        self.content_label.setText("Open Existing Scan")
-        self.content_sub.setText("Scan history coming soon...")
+        from gui.open_scan import OpenScanScreen
+        self.clear_content()
+        open_screen = OpenScanScreen(
+            on_scan_select=self.view_findings
+        )
+        self.content_area.layout().addWidget(open_screen)
 
     def open_reports(self):
         self.content_label.setText("Reports")
