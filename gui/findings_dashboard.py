@@ -16,10 +16,11 @@ SEVERITY_COLORS = {
 }
 
 class FindingsDashboard(QWidget):
-    def __init__(self, scan_id, on_finding_click=None):
+    def __init__(self, scan_id, on_finding_click=None, on_audit_click=None):
         super().__init__()
         self.scan_id = scan_id
         self.on_finding_click = on_finding_click
+        self.on_audit_click = on_audit_click
         self.findings = []
         self.setStyleSheet(self.get_stylesheet())
         self.init_ui()
@@ -35,13 +36,21 @@ class FindingsDashboard(QWidget):
         top_row.addWidget(title)
         top_row.addStretch()
 
+        audit_btn = QPushButton("Audit Log")
+        audit_btn.setObjectName("auditBtn")
+        audit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        audit_btn.clicked.connect(self.view_audit_log)
+        top_row.addWidget(audit_btn)
+
         export_pdf_btn = QPushButton("Export PDF")
         export_pdf_btn.setObjectName("exportBtn")
+        export_pdf_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         export_pdf_btn.clicked.connect(self.export_pdf)
         top_row.addWidget(export_pdf_btn)
 
         export_docx_btn = QPushButton("Export Word")
         export_docx_btn.setObjectName("exportBtn")
+        export_docx_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         export_docx_btn.clicked.connect(self.export_docx)
         top_row.addWidget(export_docx_btn)
 
@@ -60,7 +69,10 @@ class FindingsDashboard(QWidget):
         for severity in ['All', 'Critical', 'High', 'Medium', 'Low', 'Info']:
             btn = QPushButton(severity)
             btn.setObjectName("filterBtn")
-            btn.clicked.connect(lambda checked, s=severity: self.filter_table(s))
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(
+                lambda checked, s=severity: self.filter_table(s)
+            )
             filter_row.addWidget(btn)
         filter_row.addStretch()
         layout.addLayout(filter_row)
@@ -71,10 +83,17 @@ class FindingsDashboard(QWidget):
         self.table.setHorizontalHeaderLabels([
             '#', 'Severity', 'Tool', 'Asset', 'Title', 'Status'
         ])
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.horizontalHeader().setSectionResizeMode(
+            4, QHeaderView.ResizeMode.Stretch
+        )
+        self.table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.table.setEditTriggers(
+            QTableWidget.EditTrigger.NoEditTriggers
+        )
         self.table.setObjectName("findingsTable")
+        self.table.verticalHeader().setVisible(False)
         self.table.cellClicked.connect(self.on_row_click)
         self.table.setColumnWidth(0, 40)
         self.table.setColumnWidth(1, 90)
@@ -118,7 +137,9 @@ class FindingsDashboard(QWidget):
             sev = f['severity']
             counts[sev] = counts.get(sev, 0) + 1
 
-        total_card = self.make_card("Total", str(len(self.findings)), "#4a9eff")
+        total_card = self.make_card(
+            "Total", str(len(self.findings)), "#4a9eff"
+        )
         self.summary_row.addWidget(total_card)
 
         for severity, color in SEVERITY_COLORS.items():
@@ -137,12 +158,12 @@ class FindingsDashboard(QWidget):
         val_lbl = QLabel(value)
         val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         val_lbl.setStyleSheet(
-            f"font-size: 24px; font-weight: bold; color: {color};"
+            f"font-size: 24px; font-weight: bold; "
+            f"color: {color}; border: none;"
         )
-
         lbl = QLabel(label)
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl.setStyleSheet("font-size: 11px; color: #888;")
+        lbl.setStyleSheet("font-size: 11px; color: #888; border: none;")
 
         card_layout.addWidget(val_lbl)
         card_layout.addWidget(lbl)
@@ -193,7 +214,9 @@ class FindingsDashboard(QWidget):
         if severity == 'All':
             self.populate_table(self.findings)
         else:
-            filtered = [f for f in self.findings if f['severity'] == severity]
+            filtered = [
+                f for f in self.findings if f['severity'] == severity
+            ]
             self.populate_table(filtered)
 
     def on_row_click(self, row, col):
@@ -203,6 +226,10 @@ class FindingsDashboard(QWidget):
             visible_findings.append(self.findings[num])
         if self.on_finding_click and row < len(visible_findings):
             self.on_finding_click(visible_findings[row])
+
+    def view_audit_log(self):
+        if self.on_audit_click:
+            self.on_audit_click(self.scan_id)
 
     def export_pdf(self):
         from reports.report_builder import generate_pdf
@@ -283,6 +310,17 @@ class FindingsDashboard(QWidget):
                 font-weight: bold;
             }
             #exportBtn:hover { background-color: #c73652; }
+            #auditBtn {
+                background-color: #16213e;
+                color: #e0e0e0;
+                border: 1px solid #0f3460;
+                border-radius: 4px;
+                padding: 8px 16px;
+            }
+            #auditBtn:hover {
+                border: 1px solid #e94560;
+                color: #e94560;
+            }
             #hintLbl {
                 color: #444;
                 font-size: 11px;
