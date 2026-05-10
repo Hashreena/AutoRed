@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTableWidget, QTableWidgetItem,
-    QHeaderView, QFrame, QSizePolicy
+    QHeaderView, QFrame, QAbstractItemView
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
@@ -29,9 +29,24 @@ class FindingsDashboard(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 20, 30, 20)
 
+        top_row = QHBoxLayout()
         title = QLabel(f"Findings Dashboard — Scan #{self.scan_id}")
         title.setObjectName("dashTitle")
-        layout.addWidget(title)
+        top_row.addWidget(title)
+        top_row.addStretch()
+
+        export_pdf_btn = QPushButton("Export PDF")
+        export_pdf_btn.setObjectName("exportBtn")
+        export_pdf_btn.clicked.connect(self.export_pdf)
+        top_row.addWidget(export_pdf_btn)
+
+        export_docx_btn = QPushButton("Export Word")
+        export_docx_btn.setObjectName("exportBtn")
+        export_docx_btn.clicked.connect(self.export_docx)
+        top_row.addWidget(export_docx_btn)
+
+        layout.addLayout(top_row)
+        layout.addSpacing(15)
 
         self.summary_row = QHBoxLayout()
         layout.addLayout(self.summary_row)
@@ -52,22 +67,31 @@ class FindingsDashboard(QWidget):
         layout.addSpacing(10)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
+        self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels([
-            'Severity', 'Tool', 'Asset', 'Title', 'Status'
+            '#', 'Severity', 'Tool', 'Asset', 'Title', 'Status'
         ])
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setObjectName("findingsTable")
         self.table.cellClicked.connect(self.on_row_click)
+        self.table.setColumnWidth(0, 40)
+        self.table.setColumnWidth(1, 90)
+        self.table.setColumnWidth(2, 90)
+        self.table.setColumnWidth(3, 130)
+        self.table.setColumnWidth(5, 90)
         layout.addWidget(self.table)
+
+        hint = QLabel("Click any row to view full finding details")
+        hint.setObjectName("hintLbl")
+        layout.addWidget(hint)
 
     def load_findings(self):
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT id, tool, asset, category, severity, title, 
+            SELECT id, tool, asset, category, severity, title,
                    description, evidence, recommendation, status
             FROM findings WHERE scan_id=?
             ORDER BY CASE severity
@@ -80,7 +104,6 @@ class FindingsDashboard(QWidget):
         ''', (self.scan_id,))
         self.findings = [dict(row) for row in cursor.fetchall()]
         conn.close()
-
         self.update_summary()
         self.populate_table(self.findings)
 
@@ -113,7 +136,9 @@ class FindingsDashboard(QWidget):
 
         val_lbl = QLabel(value)
         val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        val_lbl.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {color};")
+        val_lbl.setStyleSheet(
+            f"font-size: 24px; font-weight: bold; color: {color};"
+        )
 
         lbl = QLabel(label)
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -125,12 +150,16 @@ class FindingsDashboard(QWidget):
 
     def populate_table(self, findings):
         self.table.setRowCount(0)
-        for finding in findings:
+        for i, finding in enumerate(findings, 1):
             row = self.table.rowCount()
             self.table.insertRow(row)
 
             severity = finding['severity']
             color = SEVERITY_COLORS.get(severity, '#888888')
+
+            num_item = QTableWidgetItem(str(i))
+            num_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            num_item.setForeground(QColor('#888'))
 
             sev_item = QTableWidgetItem(severity)
             sev_item.setForeground(QColor(color))
@@ -142,15 +171,22 @@ class FindingsDashboard(QWidget):
             asset_item = QTableWidgetItem(finding['asset'])
             title_item = QTableWidgetItem(finding['title'])
 
-            status_item = QTableWidgetItem(finding['status'])
+            status = finding['status']
+            status_item = QTableWidgetItem(status)
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if status == 'Confirmed':
+                status_item.setForeground(QColor('#1d9e75'))
+            elif status == 'Dismissed':
+                status_item.setForeground(QColor('#888'))
+            else:
+                status_item.setForeground(QColor('#ff8c00'))
 
-            self.table.setItem(row, 0, sev_item)
-            self.table.setItem(row, 1, tool_item)
-            self.table.setItem(row, 2, asset_item)
-            self.table.setItem(row, 3, title_item)
-            self.table.setItem(row, 4, status_item)
-
+            self.table.setItem(row, 0, num_item)
+            self.table.setItem(row, 1, sev_item)
+            self.table.setItem(row, 2, tool_item)
+            self.table.setItem(row, 3, asset_item)
+            self.table.setItem(row, 4, title_item)
+            self.table.setItem(row, 5, status_item)
             self.table.setRowHeight(row, 36)
 
     def filter_table(self, severity):
@@ -161,8 +197,26 @@ class FindingsDashboard(QWidget):
             self.populate_table(filtered)
 
     def on_row_click(self, row, col):
-        if self.on_finding_click and row < len(self.findings):
-            self.on_finding_click(self.findings[row])
+        visible_findings = []
+        for i in range(self.table.rowCount()):
+            num = int(self.table.item(i, 0).text()) - 1
+            visible_findings.append(self.findings[num])
+        if self.on_finding_click and row < len(visible_findings):
+            self.on_finding_click(visible_findings[row])
+
+    def export_pdf(self):
+        from reports.report_builder import generate_pdf
+        import subprocess
+        path = f'storage/{self.scan_id}/report/report.pdf'
+        generate_pdf(self.scan_id, path)
+        subprocess.Popen(['xdg-open', path])
+
+    def export_docx(self):
+        from reports.report_builder import generate_docx
+        import subprocess
+        path = f'storage/{self.scan_id}/report/report.docx'
+        generate_docx(self.scan_id, path)
+        subprocess.Popen(['xdg-open', path])
 
     def get_stylesheet(self):
         return """
@@ -176,7 +230,6 @@ class FindingsDashboard(QWidget):
                 color: #e94560;
                 font-size: 20px;
                 font-weight: bold;
-                margin-bottom: 10px;
             }
             #summaryCard {
                 background-color: #16213e;
@@ -220,5 +273,19 @@ class FindingsDashboard(QWidget):
             QTableWidget::item:selected {
                 background-color: #0f3460;
                 color: #e94560;
+            }
+            #exportBtn {
+                background-color: #e94560;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            #exportBtn:hover { background-color: #c73652; }
+            #hintLbl {
+                color: #444;
+                font-size: 11px;
+                margin-top: 4px;
             }
         """
