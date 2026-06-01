@@ -1,0 +1,11 @@
+
+.hta
+.htaccess
+.htpasswd
+~operator
+~root
+cgi-bin/
+index.html
+manual
+mrtg
+usage

@@ -1,0 +1,6 @@
+{
+  "theme": "Hacker Green",
+  "default_severity": "Info",
+  "auto_open_findings": true,
+  "scan_notifications": true
+}

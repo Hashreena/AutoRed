@@ -1,0 +1,124 @@
+AUTORED PERFORMANCE BENCHMARK REPORT
+=====================================
+Date: May 2026
+Target: 192.168.112.130 (Metasploitable 2)
+Tester: Hashreena Kaur (TP071939)
+Student ID: TP071939
+Program: B.Sc. (Hons) Computer Science (Cybersecurity)
+Institution: Asia Pacific University (APU)
+
+======================================================
+SECTION 1: MANUAL RECON — TOOL BY TOOL
+======================================================
+
+Tool          Time Taken     Output Format
+--------------------------------------------------
+Nmap          12.45 sec      Raw XML
+Subfinder      4.76 sec      Plain text list
+curl/httpx     0.04 sec      Plain text
+WhatWeb        3.41 sec      JSON file
+ffuf          92.40 sec      JSON file
+Nikto        346.61 sec      Plain text
+Gobuster       1.69 sec      Plain text
+Dirsearch     35.45 sec      Plain text
+Nuclei        65.62 sec      Plain text
+--------------------------------------------------
+Total scan time:    562.43 sec (9 min 22 sec)
+
+Post-scan manual work (estimated):
+- Reading and understanding raw output:  ~20 min
+- Organizing and categorizing findings:  ~25 min
+- Writing a basic report:                ~45 min
+--------------------------------------------------
+TOTAL MANUAL TIME:  ~99 minutes
+Findings identified: ~30 (estimated from reading raw output)
+Report format:       Raw terminal text only
+Severity scoring:    Manual judgment required
+Deduplication:       Manual comparison required
+CVE references:      Manual lookup required
+
+======================================================
+SECTION 2: AUTORED AUTOMATED RECON
+======================================================
+
+Metric                    Result
+--------------------------------------------------
+Total scan time:          563.74 sec (9 min 23 sec)
+Tools run:                12 tools automatically
+Findings saved:           141 structured findings
+  - Critical:             12
+  - High:                 51
+  - Medium:               38
+  - Low:                  26
+  - Info:                 14
+Report generated:         ~10 seconds automatically
+Dashboard ready:          Immediately after scan
+Reading output:           0 min (auto-parsed)
+Organizing findings:      0 min (auto-sorted by severity)
+Writing report:           0 min (auto-generated)
+Export formats:           PDF, Word, JSON, CSV
+--------------------------------------------------
+TOTAL AUTORED TIME:  ~10 minutes
+
+======================================================
+SECTION 3: COMPARISON TABLE
+======================================================
+
+Metric              Manual          AutoRed         Improvement
+----------------------------------------------------------------
+Scan time           9 min 22 sec    9 min 23 sec    Same
+Post-scan work      ~90 min         ~0 min          90 min saved
+Total time          ~99 min         ~10 min         89% faster
+Findings found      ~30 estimated   141 structured  370% more
+Report format       Raw text only   PDF+Word+JSON+CSV 4 formats
+Severity scoring    Manual          Automatic       Consistent
+Deduplication       Manual          Automatic       No duplicates
+CVE references      Manual lookup   Automatic       Immediate
+Network graph       Not available   Automatic       Visual map
+REST API            Not available   Available       Extensible
+
+======================================================
+SECTION 4: KEY FINDINGS
+======================================================
+
+The scan execution time is almost identical between manual
+recon and AutoRed (562 sec vs 563 sec). This is expected
+because AutoRed runs the same underlying tools.
+
+The massive difference is in POST-SCAN EFFICIENCY:
+
+Manual approach:
+- Analyst must read raw XML, JSON and plain text outputs
+- Manually identify, categorize and score each finding
+- Look up CVE references manually
+- Write report from scratch
+- Estimated 90 minutes of manual work after scanning
+
+AutoRed approach:
+- All outputs automatically parsed and normalized
+- Findings automatically sorted by severity
+- CVE references automatically identified by Nuclei
+- Report generated in 10 seconds (PDF + Word + JSON + CSV)
+- Network graph visualization generated automatically
+- 0 minutes of manual post-scan work
+
+======================================================
+SECTION 5: CONCLUSION
+======================================================
+
+AutoRed demonstrates an 89% reduction in total assessment
+time (from ~99 minutes to ~10 minutes) while identifying
+370% more findings (141 vs ~30 estimated manually).
+
+The system proves that automation of the reconnaissance
+phase of penetration testing significantly improves both
+efficiency and coverage, making it a valuable tool for
+security teams conducting VAPT engagements.
+
+Tools integrated: Nmap, Subfinder, httpx, WhatWeb, ffuf,
+Nikto, theHarvester, DNSrecon, Gobuster, Dirsearch,
+WPScan, Nuclei (12 tools total)
+
+Future work: Amass (memory constraints), Gitleaks
+(repository scanning), Shodan API, Censys API,
+Docker isolation, scheduled scans, user authentication.

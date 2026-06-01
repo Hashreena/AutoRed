@@ -1,0 +1,5 @@
+
+--- STDERR ---
+Usage: httpx [OPTIONS] URL
+
+Error: No such option: -l

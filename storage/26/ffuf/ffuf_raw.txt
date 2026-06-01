@@ -1,0 +1,14 @@
+
+.hta
+.htaccess
+.htpasswd
+cgi-bin/
+dav
+index
+index.php
+phpinfo
+phpinfo.php
+phpMyAdmin
+server-status
+test
+twiki

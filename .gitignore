@@ -1,5 +1,25 @@
-venv/
+# PyInstaller build outputs
+build/
+dist/
+*.pkg
+*.spec
+
+# Large files
+*.tar.gz
+*.zip
+*.exe
+
+# Python
 __pycache__/
 *.pyc
-storage/
+*.pyo
+venv/
+
+# Database
+autored.db
+
+# Environment
 .env
+
+# Storage
+storage/mitre_attack_cache.json
