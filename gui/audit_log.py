@@ -21,6 +21,7 @@ class AuditLogViewer(QWidget):
         top_row = QHBoxLayout()
         back_btn = QPushButton("← Back to Dashboard")
         back_btn.setObjectName("backBtn")
+        back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         back_btn.clicked.connect(self.go_back)
         top_row.addWidget(back_btn)
         top_row.addStretch()
@@ -45,6 +46,7 @@ class AuditLogViewer(QWidget):
         log_label = QLabel("Audit Trail:")
         log_label.setObjectName("logLabel")
         layout.addWidget(log_label)
+        layout.addSpacing(6)
 
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
@@ -63,7 +65,6 @@ class AuditLogViewer(QWidget):
         ''', (self.scan_id,))
         logs = cursor.fetchall()
         conn.close()
-
         self.update_stats(logs)
         self.populate_logs(logs)
 
@@ -73,17 +74,19 @@ class AuditLogViewer(QWidget):
             if child.widget():
                 child.widget().deleteLater()
 
-        tool_starts = sum(1 for l in logs if l[0] == 'tool_started')
-        tool_done = sum(1 for l in logs if l[0] == 'tool_finished')
-        tool_errors = sum(1 for l in logs if l[0] in ['tool_error', 'tool_timeout'])
-        parsed = sum(1 for l in logs if 'parsed' in l[0])
+        tool_starts  = sum(1 for l in logs if l[0] == 'tool_started')
+        tool_done    = sum(1 for l in logs if l[0] == 'tool_finished')
+        tool_errors  = sum(
+            1 for l in logs if l[0] in ['tool_error', 'tool_timeout']
+        )
+        parsed       = sum(1 for l in logs if 'parsed' in l[0])
 
         cards = [
-            ("Total Events",    str(len(logs)),      "#4a9eff"),
-            ("Tools Started",   str(tool_starts),    "#1d9e75"),
-            ("Tools Finished",  str(tool_done),      "#1d9e75"),
-            ("Parse Events",    str(parsed),         "#ff8c00"),
-            ("Errors",          str(tool_errors),    "#e94560"),
+            ("Total Events",   str(len(logs)),     "#4a9eff"),
+            ("Tools Started",  str(tool_starts),   "#1d9e75"),
+            ("Tools Finished", str(tool_done),     "#1d9e75"),
+            ("Parse Events",   str(parsed),        "#ff8c00"),
+            ("Errors",         str(tool_errors),   "#e94560"),
         ]
         for label, value, color in cards:
             card = self.make_card(label, value, color)
@@ -95,22 +98,30 @@ class AuditLogViewer(QWidget):
         card.setObjectName("statsCard")
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(15, 8, 15, 8)
+
         val_lbl = QLabel(value)
         val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         val_lbl.setStyleSheet(
             f"font-size: 22px; font-weight: bold; "
-            f"color: {color}; border: none;"
+            f"color: {color}; border: none; background: transparent;"
         )
+
         lbl = QLabel(label)
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl.setStyleSheet("font-size: 10px; color: #888; border: none;")
+        lbl.setStyleSheet(
+            "font-size: 10px; color: #8b949e; "
+            "border: none; background: transparent;"
+        )
+
         card_layout.addWidget(val_lbl)
         card_layout.addWidget(lbl)
         return card
 
     def populate_logs(self, logs):
         if not logs:
-            self.log_text.setPlainText("No audit logs found for this scan.")
+            self.log_text.setPlainText(
+                "No audit logs found for this scan."
+            )
             return
 
         lines = []
@@ -143,8 +154,8 @@ class AuditLogViewer(QWidget):
     def get_stylesheet(self):
         return """
             QWidget {
-                background-color: #1a1a2e;
-                color: #e0e0e0;
+                background-color: #0d1117;
+                color: #e6edf3;
                 font-family: Arial;
                 font-size: 13px;
             }
@@ -152,41 +163,48 @@ class AuditLogViewer(QWidget):
                 color: #e94560;
                 font-size: 20px;
                 font-weight: bold;
+                background: transparent;
+                border: none;
             }
             #auditSub {
-                color: #888;
+                color: #8b949e;
                 font-size: 12px;
+                background: transparent;
+                border: none;
             }
             #logLabel {
-                color: #aaa;
+                color: #e6edf3;
                 font-size: 12px;
-                margin-bottom: 4px;
+                font-weight: bold;
+                background: transparent;
+                border: none;
             }
             #logText {
-                background-color: #0d0d1a;
-                color: #00ff41;
+                background-color: #010409;
+                color: #3fb950;
                 font-family: Courier;
                 font-size: 11px;
-                border: 1px solid #0f3460;
-                border-radius: 4px;
+                border: 1px solid #30363d;
+                border-radius: 6px;
                 padding: 10px;
             }
             #statsCard {
-                background-color: #16213e;
-                border: 1px solid #0f3460;
+                background-color: #161b22;
+                border: 1px solid #30363d;
                 border-radius: 8px;
                 min-width: 100px;
                 max-width: 150px;
             }
             #backBtn {
                 background-color: transparent;
-                color: #888;
-                border: 1px solid #444;
+                color: #8b949e;
+                border: 1px solid #30363d;
                 border-radius: 4px;
                 padding: 6px 16px;
+                font-size: 12px;
             }
             #backBtn:hover {
-                color: #e0e0e0;
-                border: 1px solid #e0e0e0;
+                color: #e6edf3;
+                border-color: #e6edf3;
             }
         """

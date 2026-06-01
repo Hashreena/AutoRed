@@ -14,6 +14,13 @@ def init_db():
     cursor = conn.cursor()
 
     cursor.executescript('''
+        CREATE TABLE IF NOT EXISTS folders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
         CREATE TABLE IF NOT EXISTS scans (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -21,8 +28,10 @@ def init_db():
             profile TEXT NOT NULL,
             status TEXT DEFAULT 'pending',
             approval_ref TEXT,
+            folder_id INTEGER,
             created_at TEXT,
-            completed_at TEXT
+            completed_at TEXT,
+            FOREIGN KEY (folder_id) REFERENCES folders(id)
         );
 
         CREATE TABLE IF NOT EXISTS assets (
@@ -74,29 +83,89 @@ def init_db():
         );
     ''')
 
+    try:
+        cursor.execute(
+            'ALTER TABLE scans ADD COLUMN folder_id INTEGER'
+        )
+        conn.commit()
+        print("Added folder_id column to scans table.")
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
     print("Database initialized successfully.")
 
-def insert_scan(name, target, profile, approval_ref=None):
+def insert_scan(name, target, profile, approval_ref=None, folder_id=None):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO scans (name, target, profile, approval_ref, created_at)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (name, target, profile, approval_ref, datetime.now().isoformat()))
+        INSERT INTO scans
+        (name, target, profile, approval_ref, folder_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (
+        name, target, profile, approval_ref,
+        folder_id, datetime.now().isoformat()
+    ))
     conn.commit()
     scan_id = cursor.lastrowid
     conn.close()
     return scan_id
 
-def insert_finding(scan_id, tool, asset, category, severity, title, description, evidence, recommendation):
+def insert_folder(name, description=''):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'INSERT INTO folders (name, description) VALUES (?, ?)',
+        (name, description)
+    )
+    folder_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return folder_id
+
+def get_folders():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO findings (scan_id, tool, asset, category, severity, title, description, evidence, recommendation, created_at)
+        SELECT f.id, f.name, f.description, f.created_at,
+               COUNT(s.id) as scan_count
+        FROM folders f
+        LEFT JOIN scans s ON f.id = s.folder_id
+        GROUP BY f.id
+        ORDER BY f.created_at DESC
+    ''')
+    folders = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return folders
+
+def delete_folder(folder_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'UPDATE scans SET folder_id=NULL WHERE folder_id=?',
+        (folder_id,)
+    )
+    cursor.execute('DELETE FROM folders WHERE id=?', (folder_id,))
+    conn.commit()
+    conn.close()
+
+def insert_finding(
+    scan_id, tool, asset, category, severity,
+    title, description, evidence, recommendation
+):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO findings
+        (scan_id, tool, asset, category, severity, title,
+         description, evidence, recommendation, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (scan_id, tool, asset, category, severity, title, description, evidence, recommendation, datetime.now().isoformat()))
+    ''', (
+        scan_id, tool, asset, category, severity, title,
+        description, evidence, recommendation,
+        datetime.now().isoformat()
+    ))
     conn.commit()
     conn.close()
 
@@ -104,7 +173,8 @@ def insert_tool_run(scan_id, tool, command):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO tool_runs (scan_id, tool, command, status, started_at)
+        INSERT INTO tool_runs
+        (scan_id, tool, command, status, started_at)
         VALUES (?, ?, ?, 'running', ?)
     ''', (scan_id, tool, command, datetime.now().isoformat()))
     conn.commit()
@@ -119,7 +189,10 @@ def update_tool_run(run_id, status, exit_code, output_path):
         UPDATE tool_runs
         SET status=?, exit_code=?, output_path=?, completed_at=?
         WHERE id=?
-    ''', (status, exit_code, output_path, datetime.now().isoformat(), run_id))
+    ''', (
+        status, exit_code, output_path,
+        datetime.now().isoformat(), run_id
+    ))
     conn.commit()
     conn.close()
 
@@ -136,7 +209,10 @@ def insert_audit_log(scan_id, action, detail):
 def get_findings(scan_id):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM findings WHERE scan_id=? ORDER BY severity', (scan_id,))
+    cursor.execute(
+        'SELECT * FROM findings WHERE scan_id=? ORDER BY severity',
+        (scan_id,)
+    )
     rows = cursor.fetchall()
     conn.close()
     return rows

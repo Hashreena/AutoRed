@@ -4,19 +4,26 @@ from backend.db import insert_finding, insert_audit_log
 def parse_httpx(scan_id, raw_output, target):
     findings = []
 
-    lines = raw_output.strip().split('\n')
-    lines = [line.strip() for line in lines if line.strip()]
-
-    if not lines:
+    if not raw_output or not raw_output.strip():
         print("[*] httpx: no output to parse")
         insert_audit_log(scan_id, 'httpx_parsed', '0 live hosts found')
         return findings
 
+    lines = raw_output.strip().split('\n')
+    lines = [line.strip().strip("'") for line in lines if line.strip()]
+
     for line in lines:
+        if not line:
+            continue
+
         try:
             data = json.loads(line)
         except json.JSONDecodeError:
-            continue
+            try:
+                line = line.replace("'", '"')
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                continue
 
         url = data.get('url', '')
         status_code = data.get('status_code', 0)
@@ -24,23 +31,34 @@ def parse_httpx(scan_id, raw_output, target):
         tech = data.get('tech', [])
         content_length = data.get('content_length', 0)
 
+        if not url:
+            continue
+
         if status_code in [401, 403]:
             severity = 'Medium'
         elif status_code == 200:
             severity = 'Info'
-        else:
+        elif status_code in [301, 302]:
             severity = 'Low'
+        else:
+            severity = 'Info'
 
         finding_title = f"Live host detected: {url} [{status_code}]"
         description = (
             f"Host {url} is live and returned HTTP {status_code}. "
             f"Page title: {title}. "
-            f"Technologies detected: {', '.join(tech) if tech else 'none'}."
+            f"Technologies detected: "
+            f"{', '.join(tech) if tech else 'none'}."
         )
-        evidence = f"httpx detected live host at {url} with status {status_code} and content length {content_length}"
+        evidence = (
+            f"curl/httpx detected live host at {url} "
+            f"with status {status_code} "
+            f"and content length {content_length}"
+        )
         recommendation = (
-            "Review this host. Ensure it is intentional and properly secured. "
-            "Check for sensitive information exposure and proper authentication."
+            "Review this host. Ensure it is intentional and "
+            "properly secured. Check for sensitive information "
+            "exposure and proper authentication."
         )
 
         finding = {
@@ -54,7 +72,6 @@ def parse_httpx(scan_id, raw_output, target):
             'evidence': evidence,
             'recommendation': recommendation
         }
-
         findings.append(finding)
 
         insert_finding(
@@ -71,7 +88,10 @@ def parse_httpx(scan_id, raw_output, target):
 
         print(f"[{severity.upper()}] {finding_title}")
 
-    insert_audit_log(scan_id, 'httpx_parsed', f"{len(findings)} live hosts found")
+    insert_audit_log(
+        scan_id, 'httpx_parsed',
+        f"{len(findings)} live hosts found"
+    )
     print(f"[+] httpx parser done — {len(findings)} findings saved")
     return findings
 
@@ -79,10 +99,13 @@ if __name__ == '__main__':
     from backend.db import init_db
     init_db()
 
-    raw = '''{"url":"http://scanme.nmap.org","status_code":200,"title":"Go ahead and ScanMe!","tech":["Apache"]}
-{"url":"https://scanme.nmap.org","status_code":200,"title":"Go ahead and ScanMe!","tech":["Apache"]}'''
+    raw = '{"url":"http://192.168.112.130","status_code":200,"title":"Metasploitable2"}'
 
-    findings = parse_httpx(scan_id=2, raw_output=raw, target='scanme.nmap.org')
+    findings = parse_httpx(
+        scan_id=2,
+        raw_output=raw,
+        target='192.168.112.130'
+    )
     print(f"\nTotal findings: {len(findings)}")
     for f in findings:
         print(f"  [{f['severity']}] {f['title']}")

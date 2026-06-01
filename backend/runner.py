@@ -11,7 +11,14 @@ def run_tool(scan_id, tool, command, output_dir):
     print(f"[*] Command: {command}")
 
     run_id = insert_tool_run(scan_id, tool, command)
-    insert_audit_log(scan_id, 'tool_started', f"{tool} started at {datetime.now().isoformat()}")
+    insert_audit_log(
+        scan_id, 'tool_started',
+        f"{tool} started at {datetime.now().isoformat()}"
+    )
+
+    nikto_timeout = 900
+    other_timeout = 300
+    timeout = nikto_timeout if 'nikto' in command else other_timeout
 
     try:
         result = subprocess.run(
@@ -19,7 +26,7 @@ def run_tool(scan_id, tool, command, output_dir):
             shell=True,
             capture_output=True,
             text=True,
-            timeout=300
+            timeout=timeout
         )
 
         with open(output_file, 'w') as f:
@@ -30,7 +37,10 @@ def run_tool(scan_id, tool, command, output_dir):
 
         status = 'completed' if result.returncode == 0 else 'failed'
         update_tool_run(run_id, status, result.returncode, output_file)
-        insert_audit_log(scan_id, 'tool_finished', f"{tool} finished with exit code {result.returncode}")
+        insert_audit_log(
+            scan_id, 'tool_finished',
+            f"{tool} finished with exit code {result.returncode}"
+        )
 
         print(f"[+] {tool} finished — status: {status}")
         return {
@@ -44,20 +54,26 @@ def run_tool(scan_id, tool, command, output_dir):
 
     except subprocess.TimeoutExpired:
         update_tool_run(run_id, 'timeout', -1, output_file)
-        insert_audit_log(scan_id, 'tool_timeout', f"{tool} timed out")
-        print(f"[-] {tool} timed out")
+        insert_audit_log(
+            scan_id, 'tool_timeout',
+            f"{tool} timed out after {timeout} seconds"
+        )
+        print(f"[-] {tool} timed out after {timeout} seconds")
         return {
             'tool': tool,
             'status': 'timeout',
             'output_file': output_file,
             'stdout': '',
-            'stderr': 'Tool timed out',
+            'stderr': f'Tool timed out after {timeout} seconds',
             'exit_code': -1
         }
 
     except Exception as e:
         update_tool_run(run_id, 'error', -1, output_file)
-        insert_audit_log(scan_id, 'tool_error', f"{tool} error: {str(e)}")
+        insert_audit_log(
+            scan_id, 'tool_error',
+            f"{tool} error: {str(e)}"
+        )
         print(f"[-] {tool} error: {str(e)}")
         return {
             'tool': tool,

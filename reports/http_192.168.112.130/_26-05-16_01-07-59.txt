@@ -1,0 +1,32 @@
+# Dirsearch started Sat May 16 01:08:30 2026 as: /usr/lib/python3/dist-packages/dirsearch/dirsearch.py -u http://192.168.112.130 -q
+
+403   299B   http://192.168.112.130/.ht_wsr.txt
+403   302B   http://192.168.112.130/.htaccess.bak1
+403   304B   http://192.168.112.130/.htaccess.sample
+403   302B   http://192.168.112.130/.htaccess.orig
+403   303B   http://192.168.112.130/.htaccess_extra
+403   302B   http://192.168.112.130/.htaccess.save
+403   300B   http://192.168.112.130/.htaccess_sc
+403   302B   http://192.168.112.130/.htaccess_orig
+403   300B   http://192.168.112.130/.htaccessOLD
+403   300B   http://192.168.112.130/.htaccessBAK
+403   301B   http://192.168.112.130/.htaccessOLD2
+403   292B   http://192.168.112.130/.htm
+403   293B   http://192.168.112.130/.html
+403   302B   http://192.168.112.130/.htpasswd_test
+403   299B   http://192.168.112.130/.httr-oauth
+403   298B   http://192.168.112.130/.htpasswds
+403   296B   http://192.168.112.130/cgi-bin/
+200   111KB  http://192.168.112.130/doc/
+302     0B   http://192.168.112.130/dvwa/    -> REDIRECTS TO: login.php
+200    24KB  http://192.168.112.130/mutillidae/
+200    49KB  http://192.168.112.130/phpinfo.php
+200    49KB  http://192.168.112.130/phpinfo
+301   328B   http://192.168.112.130/phpMyAdmin    -> REDIRECTS TO: http://192.168.112.130/phpMyAdmin/
+200     4KB  http://192.168.112.130/phpMyAdmin/
+200     4KB  http://192.168.112.130/phpMyAdmin/index.php
+403   301B   http://192.168.112.130/server-status
+403   302B   http://192.168.112.130/server-status/
+301   322B   http://192.168.112.130/test    -> REDIRECTS TO: http://192.168.112.130/test/
+200   886B   http://192.168.112.130/test/
+301   326B   http://192.168.112.130/tikiwiki    -> REDIRECTS TO: http://192.168.112.130/tikiwiki/

@@ -1,0 +1,272 @@
+[
+  {
+    "product":   "vsftpd",
+    "version":   "2.3.4",
+    "cve":       "CVE-2011-2523",
+    "name":      "vsftpd 2.3.4 Backdoor",
+    "severity":  "Critical",
+    "cvss":      9.8,
+    "cvss_ver":  "3.1"
+  },
+  {
+    "product":   "unrealircd",
+    "version":   "",
+    "cve":       "CVE-2010-2075",
+    "name":      "UnrealIRCd Backdoor",
+    "severity":  "Critical",
+    "cvss":      10.0,
+    "cvss_ver":  "2.0"
+  },
+  {
+    "product":   "unreal ircd",
+    "version":   "",
+    "cve":       "CVE-2010-2075",
+    "name":      "UnrealIRCd Backdoor",
+    "severity":  "Critical",
+    "cvss":      10.0,
+    "cvss_ver":  "2.0"
+  },
+  {
+    "product":   "samba usermap",
+    "version":   "",
+    "cve":       "CVE-2007-2447",
+    "name":      "Samba Username Map Script RCE",
+    "severity":  "Critical",
+    "cvss":      9.3,
+    "cvss_ver":  "2.0"
+  },
+  {
+    "product":   "username map",
+    "version":   "",
+    "cve":       "CVE-2007-2447",
+    "name":      "Samba Username Map Script RCE",
+    "severity":  "Critical",
+    "cvss":      9.3,
+    "cvss_ver":  "2.0"
+  },
+  {
+    "product":   "usermap script",
+    "version":   "",
+    "cve":       "CVE-2007-2447",
+    "name":      "Samba Username Map Script RCE",
+    "severity":  "Critical",
+    "cvss":      9.3,
+    "cvss_ver":  "2.0"
+  },
+  {
+    "product":   "usermap",
+    "version":   "",
+    "cve":       "CVE-2007-2447",
+    "name":      "Samba Username Map Script RCE",
+    "severity":  "Critical",
+    "cvss":      9.3,
+    "cvss_ver":  "2.0"
+  },
+  {
+    "product":   "php cgi",
+    "version":   "",
+    "cve":       "CVE-2012-1823",
+    "name":      "PHP CGI Argument Injection",
+    "severity":  "High",
+    "cvss":      7.5,
+    "cvss_ver":  "3.1"
+  },
+  {
+    "product":   "cgi argument",
+    "version":   "",
+    "cve":       "CVE-2012-1823",
+    "name":      "PHP CGI Argument Injection",
+    "severity":  "High",
+    "cvss":      7.5,
+    "cvss_ver":  "3.1"
+  },
+  {
+    "product":   "argument injection",
+    "version":   "",
+    "cve":       "CVE-2012-1823",
+    "name":      "PHP CGI Argument Injection",
+    "severity":  "High",
+    "cvss":      7.5,
+    "cvss_ver":  "3.1"
+  },
+  {
+    "product":   "distcc",
+    "version":   "",
+    "cve":       "CVE-2004-2687",
+    "name":      "DistCC Remote Code Execution",
+    "severity":  "High",
+    "cvss":      9.3,
+    "cvss_ver":  "2.0"
+  },
+  {
+    "product":   "openssh",
+    "version":   "4.7",
+    "cve":       "CVE-2008-5161",
+    "name":      "OpenSSH CBC Mode Vulnerability",
+    "severity":  "Medium",
+    "cvss":      2.6,
+    "cvss_ver":  "2.0"
+  },
+  {
+    "product":   "apache",
+    "version":   "2.4.49",
+    "cve":       "CVE-2021-41773",
+    "name":      "Apache Path Traversal",
+    "severity":  "Critical",
+    "cvss":      9.8,
+    "cvss_ver":  "3.1"
+  },
+  {
+    "product":   "apache",
+    "version":   "2.4.50",
+    "cve":       "CVE-2021-42013",
+    "name":      "Apache Path Traversal RCE",
+    "severity":  "Critical",
+    "cvss":      9.8,
+    "cvss_ver":  "3.1"
+  },
+  {
+    "product":   "proftpd",
+    "version":   "1.3.3",
+    "cve":       "CVE-2011-4130",
+    "name":      "ProFTPD Remote Code Execution",
+    "severity":  "High",
+    "cvss":      9.0,
+    "cvss_ver":  "2.0"
+  },
+  {
+    "product":   "twiki",
+    "version":   "",
+    "cve":       "CVE-2004-1037",
+    "name":      "TWiki Remote Code Execution",
+    "severity":  "High",
+    "cvss":      7.5,
+    "cvss_ver":  "2.0"
+  },
+  {
+    "product":   "webmin",
+    "version":   "1.890",
+    "cve":       "CVE-2019-15107",
+    "name":      "Webmin Remote Code Execution",
+    "severity":  "Critical",
+    "cvss":      9.8,
+    "cvss_ver":  "3.1"
+  },
+  {
+    "product":   "tomcat",
+    "version":   "9.0.0",
+    "cve":       "CVE-2020-1938",
+    "name":      "Apache Tomcat AJP File Inclusion",
+    "severity":  "Critical",
+    "cvss":      9.8,
+    "cvss_ver":  "3.1"
+  },
+  {
+    "product":   "drupal",
+    "version":   "7",
+    "cve":       "CVE-2014-3704",
+    "name":      "Drupal SQL Injection Drupalgeddon",
+    "severity":  "Critical",
+    "cvss":      7.5,
+    "cvss_ver":  "2.0"
+  },
+  {
+    "product":   "wordpress",
+    "version":   "",
+    "cve":       "CVE-2022-21661",
+    "name":      "WordPress SQL Injection",
+    "severity":  "High",
+    "cvss":      8.1,
+    "cvss_ver":  "3.1"
+  },
+  {
+    "product":   "phpmyadmin",
+    "version":   "",
+    "cve":       "CVE-2018-12613",
+    "name":      "phpMyAdmin Local File Inclusion",
+    "severity":  "High",
+    "cvss":      8.8,
+    "cvss_ver":  "3.1"
+  },
+  {
+    "product":   "openssl",
+    "version":   "1.0.1",
+    "cve":       "CVE-2014-0160",
+    "name":      "OpenSSL Heartbleed",
+    "severity":  "High",
+    "cvss":      7.5,
+    "cvss_ver":  "3.1"
+  },
+  {
+    "product":   "bash",
+    "version":   "",
+    "cve":       "CVE-2014-6271",
+    "name":      "Bash Shellshock",
+    "severity":  "Critical",
+    "cvss":      9.8,
+    "cvss_ver":  "3.1"
+  },
+  {
+    "product":   "log4j",
+    "version":   "",
+    "cve":       "CVE-2021-44228",
+    "name":      "Log4Shell Remote Code Execution",
+    "severity":  "Critical",
+    "cvss":      10.0,
+    "cvss_ver":  "3.1"
+  },
+  {
+    "product":   "spring",
+    "version":   "",
+    "cve":       "CVE-2022-22965",
+    "name":      "Spring4Shell Remote Code Execution",
+    "severity":  "Critical",
+    "cvss":      9.8,
+    "cvss_ver":  "3.1"
+  },
+  {
+    "product":   "java rmi",
+    "version":   "",
+    "cve":       "CVE-2011-3556",
+    "name":      "Java RMI Remote Code Execution",
+    "severity":  "High",
+    "cvss":      7.5,
+    "cvss_ver":  "2.0"
+  },
+  {
+    "product":   "rmi registry",
+    "version":   "",
+    "cve":       "CVE-2011-3556",
+    "name":      "Java RMI Registry RCE",
+    "severity":  "High",
+    "cvss":      7.5,
+    "cvss_ver":  "2.0"
+  },
+  {
+    "product":   "ingreslock",
+    "version":   "",
+    "cve":       "CVE-2003-0550",
+    "name":      "Ingreslock Backdoor Port 1524",
+    "severity":  "Critical",
+    "cvss":      10.0,
+    "cvss_ver":  "2.0"
+  },
+  {
+    "product":   "bindshell",
+    "version":   "",
+    "cve":       "CVE-2003-0550",
+    "name":      "Bind Shell Backdoor",
+    "severity":  "Critical",
+    "cvss":      10.0,
+    "cvss_ver":  "2.0"
+  },
+  {
+    "product":   "bind shell",
+    "version":   "",
+    "cve":       "CVE-2003-0550",
+    "name":      "Bind Shell Backdoor",
+    "severity":  "Critical",
+    "cvss":      10.0,
+    "cvss_ver":  "2.0"
+  }
+]
