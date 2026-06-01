@@ -31,7 +31,8 @@ STEP_LABELS = ['Target', 'Folder', 'Profile', 'Tools', 'Confirm']
 
 
 class ToolCard(QFrame):
-    def __init__(self, tool_name, emoji, description, parent=None):
+    def __init__(self, tool_name, emoji, description,
+                 parent=None):
         super().__init__(parent)
         self.tool_name = tool_name
         self.selected  = True
@@ -49,7 +50,8 @@ class ToolCard(QFrame):
         self.emoji_lbl = QLabel(emoji)
         self.emoji_lbl.setFixedWidth(28)
         self.emoji_lbl.setStyleSheet(
-            "font-size: 20px; background: transparent; border: none;"
+            "font-size: 20px; background: transparent; "
+            "border: none;"
         )
         layout.addWidget(self.emoji_lbl)
 
@@ -58,7 +60,8 @@ class ToolCard(QFrame):
 
         self.name_lbl = QLabel(self.tool_name)
         self.name_lbl.setStyleSheet(
-            "color: #e6edf3; font-size: 13px; font-weight: bold; "
+            "color: #e6edf3; font-size: 13px; "
+            "font-weight: bold; "
             "background: transparent; border: none;"
         )
         text_col.addWidget(self.name_lbl)
@@ -74,7 +77,9 @@ class ToolCard(QFrame):
 
         self.check_lbl = QLabel("✓")
         self.check_lbl.setFixedSize(22, 22)
-        self.check_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.check_lbl.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
         self.check_lbl.setStyleSheet(
             "background: #e94560; color: white; "
             "border-radius: 4px; font-size: 12px; "
@@ -110,8 +115,10 @@ class ToolCard(QFrame):
             """)
             self.check_lbl.setText("")
             self.check_lbl.setStyleSheet(
-                "background: transparent; color: transparent; "
-                "border-radius: 4px; border: 1px solid #30363d;"
+                "background: transparent; "
+                "color: transparent; "
+                "border-radius: 4px; "
+                "border: 1px solid #30363d;"
             )
 
     def mousePressEvent(self, event):
@@ -130,9 +137,9 @@ class ToolCard(QFrame):
 class ScanWizard(QWidget):
     def __init__(self, on_scan_start=None):
         super().__init__()
-        self.on_scan_start = on_scan_start
-        self.scan_config   = {}
-        self.tool_cards    = {}
+        self.on_scan_start   = on_scan_start
+        self.scan_config     = {}
+        self.tool_cards      = {}
         self.profile_buttons = {}
         self.setStyleSheet(self.get_stylesheet())
         self.init_ui()
@@ -146,11 +153,14 @@ class ScanWizard(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setStyleSheet(
-            "QScrollArea { border: none; background: #0d1117; }"
+            "QScrollArea { border: none; "
+            "background: #0d1117; }"
         )
 
         self.container = QWidget()
-        self.container.setStyleSheet("background: #0d1117;")
+        self.container.setStyleSheet(
+            "background: #0d1117;"
+        )
         self.main_layout = QVBoxLayout(self.container)
         self.main_layout.setContentsMargins(50, 36, 50, 36)
         self.main_layout.setSpacing(0)
@@ -161,7 +171,7 @@ class ScanWizard(QWidget):
 
     def clear_layout(self):
         while self.main_layout.count():
-            item = self.main_layout.takeAt(0)
+            item   = self.main_layout.takeAt(0)
             widget = item.widget()
             if widget:
                 widget.setParent(None)
@@ -173,7 +183,7 @@ class ScanWizard(QWidget):
 
     def delete_layout(self, layout):
         while layout.count():
-            item = layout.takeAt(0)
+            item   = layout.takeAt(0)
             widget = item.widget()
             if widget:
                 widget.setParent(None)
@@ -200,6 +210,7 @@ class ScanWizard(QWidget):
     def add_step_indicator(self, current):
         row = QHBoxLayout()
         row.setSpacing(0)
+
         for i in range(1, 6):
             col = QVBoxLayout()
             col.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -211,7 +222,8 @@ class ScanWizard(QWidget):
             if i <= current:
                 dot.setStyleSheet(
                     "background:#e94560;color:white;"
-                    "border-radius:15px;font-weight:bold;font-size:11px;"
+                    "border-radius:15px;font-weight:bold;"
+                    "font-size:11px;"
                 )
             else:
                 dot.setStyleSheet(
@@ -277,6 +289,7 @@ class ScanWizard(QWidget):
                 next_label="Next →"):
         self.main_layout.addSpacing(32)
         self.main_layout.addStretch()
+
         nav = QHBoxLayout()
 
         RED_BTN = """
@@ -297,57 +310,56 @@ class ScanWizard(QWidget):
         if back_step is not None:
             back_btn = QPushButton("← Back")
             back_btn.setStyleSheet(RED_BTN)
-            back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            back_btn.setCursor(
+                Qt.CursorShape.PointingHandCursor
+            )
             back_btn.clicked.connect(
                 lambda: self.show_step(back_step)
             )
             nav.addWidget(back_btn)
+
         nav.addStretch()
+
         if next_fn:
             nxt = QPushButton(next_label)
             nxt.setStyleSheet(RED_BTN)
             nxt.setCursor(Qt.CursorShape.PointingHandCursor)
             nxt.clicked.connect(next_fn)
             nav.addWidget(nxt)
+
         self.main_layout.addLayout(nav)
 
-    # ── Step 1 ──────────────────────────────────────────────
+    # ── Step 1 ───────────────────────────────────────────────
     def build_step1(self):
         self.add_title(
             "Step 1 — Target & Scan Details",
-            "Enter the target you want to scan and give this scan a name."
+            "Enter the target you want to scan "
+            "and give this scan a name."
         )
         self.add_step_indicator(1)
 
         self.add_field_label(
-            "Target", "Domain, IP address or CIDR range"
+            "Target",
+            "Domain, IP address or CIDR range"
         )
         self.target_input = self.make_input(
             "e.g. scanme.nmap.org or 192.168.112.130",
             self.scan_config.get('target', '')
         )
         self.main_layout.addWidget(self.target_input)
+
         self.main_layout.addSpacing(28)
 
         self.add_field_label(
-            "Scan Name", "Give this scan a descriptive name"
+            "Scan Name",
+            "Give this scan a descriptive name"
         )
         self.name_input = self.make_input(
             "e.g. Q2 External Recon",
             self.scan_config.get('name', '')
         )
         self.main_layout.addWidget(self.name_input)
-        self.main_layout.addSpacing(28)
 
-        self.add_field_label(
-            "Approval / Ticket Reference",
-            "JIRA ticket, email approval or engagement reference (optional)"
-        )
-        self.ref_input = self.make_input(
-            "e.g. JIRA-1234 or email approval ref",
-            self.scan_config.get('approval_ref', '')
-        )
-        self.main_layout.addWidget(self.ref_input)
         self.main_layout.addSpacing(12)
 
         self.step1_error = QLabel("")
@@ -359,28 +371,36 @@ class ScanWizard(QWidget):
     def validate_step1(self):
         target = self.target_input.text().strip()
         name   = self.name_input.text().strip()
+
         if not target:
-            self.step1_error.setText("Target cannot be empty.")
+            self.step1_error.setText(
+                "Target cannot be empty."
+            )
             return
+
         if not name:
-            self.step1_error.setText("Scan name cannot be empty.")
+            self.step1_error.setText(
+                "Scan name cannot be empty."
+            )
             return
+
         result = validate_target(target)
         if not result['allowed']:
             self.step1_error.setText(
                 f"Target blocked: {result['reason']}"
             )
             return
-        self.scan_config['target']       = target
-        self.scan_config['name']         = name
-        self.scan_config['approval_ref'] = self.ref_input.text().strip()
+
+        self.scan_config['target'] = target
+        self.scan_config['name']   = name
         self.show_step(2)
 
-    # ── Step 2 ──────────────────────────────────────────────
+    # ── Step 2 ───────────────────────────────────────────────
     def build_step2(self):
         self.add_title(
             "Step 2 — Choose Folder",
-            "Organise this scan into a folder by client or project."
+            "Organise this scan into a folder "
+            "by client or project."
         )
         self.add_step_indicator(2)
 
@@ -388,11 +408,15 @@ class ScanWizard(QWidget):
             "Select Folder",
             "Pick an existing folder or create a new one below"
         )
+
         self.folder_combo = QComboBox()
         self.folder_combo.setObjectName("inputField")
-        self.folder_combo.addItem("— No folder (unorganised) —", None)
+        self.folder_combo.addItem(
+            "— No folder (unorganised) —", None
+        )
         self.load_folders_combo()
         self.main_layout.addWidget(self.folder_combo)
+
         self.main_layout.addSpacing(28)
 
         divider = QFrame()
@@ -400,24 +424,30 @@ class ScanWizard(QWidget):
         divider.setFixedHeight(1)
         divider.setStyleSheet("background:#30363d;")
         self.main_layout.addWidget(divider)
+
         self.main_layout.addSpacing(24)
 
         new_lbl = QLabel("Create New Folder")
         new_lbl.setObjectName("fieldLabel")
         self.main_layout.addWidget(new_lbl)
+
         self.main_layout.addSpacing(4)
 
         new_sub = QLabel(
             "Type a name and click Create — "
-            "it will be added to the dropdown above automatically."
+            "it will be added to the dropdown above."
         )
         new_sub.setObjectName("fieldSub")
         self.main_layout.addWidget(new_sub)
+
         self.main_layout.addSpacing(12)
 
         name_row = QHBoxLayout()
         name_row.setSpacing(10)
-        self.new_folder_name = self.make_input("e.g. Client A — VAPT")
+
+        self.new_folder_name = self.make_input(
+            "e.g. Client A — VAPT"
+        )
         name_row.addWidget(self.new_folder_name)
 
         create_btn = QPushButton("+ Create Folder")
@@ -425,7 +455,9 @@ class ScanWizard(QWidget):
         create_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         create_btn.clicked.connect(self.create_folder_inline)
         name_row.addWidget(create_btn)
+
         self.main_layout.addLayout(name_row)
+
         self.main_layout.addSpacing(16)
 
         self.add_field_label("Description (optional)")
@@ -433,6 +465,7 @@ class ScanWizard(QWidget):
             "e.g. External VAPT for Client A"
         )
         self.main_layout.addWidget(self.new_folder_desc)
+
         self.main_layout.addSpacing(12)
 
         self.folder_msg = QLabel("")
@@ -464,8 +497,11 @@ class ScanWizard(QWidget):
             self.folder_msg.setStyleSheet(
                 "color:#e94560;font-size:11px;"
             )
-            self.folder_msg.setText("Please enter a folder name.")
+            self.folder_msg.setText(
+                "Please enter a folder name."
+            )
             return
+
         desc      = self.new_folder_desc.text().strip()
         folder_id = insert_folder(name, desc)
         self.folder_combo.addItem(f"📁 {name}", folder_id)
@@ -474,16 +510,20 @@ class ScanWizard(QWidget):
         )
         self.new_folder_name.clear()
         self.new_folder_desc.clear()
-        self.folder_msg.setStyleSheet("color:#1d9e75;font-size:11px;")
+        self.folder_msg.setStyleSheet(
+            "color:#1d9e75;font-size:11px;"
+        )
         self.folder_msg.setText(
             f"✓ Folder '{name}' created and selected!"
         )
 
     def validate_step2(self):
-        self.scan_config['folder_id'] = self.folder_combo.currentData()
+        self.scan_config['folder_id'] = (
+            self.folder_combo.currentData()
+        )
         self.show_step(3)
 
-    # ── Step 3 ──────────────────────────────────────────────
+    # ── Step 3 ───────────────────────────────────────────────
     def build_step3(self):
         self.add_title(
             "Step 3 — Select Scan Profile",
@@ -492,6 +532,7 @@ class ScanWizard(QWidget):
         self.add_step_indicator(3)
 
         self.profile_buttons = {}
+
         for profile, description in PROFILES.items():
             btn = QPushButton(f"{profile}\n{description}")
             btn.setCheckable(True)
@@ -512,7 +553,8 @@ class ScanWizard(QWidget):
                 }
             """)
             btn.clicked.connect(
-                lambda checked, p=profile: self.select_profile(p)
+                lambda checked, p=profile:
+                self.select_profile(p)
             )
             self.main_layout.addWidget(btn)
             self.main_layout.addSpacing(12)
@@ -564,11 +606,13 @@ class ScanWizard(QWidget):
 
     def validate_step3(self):
         if 'profile' not in self.scan_config:
-            self.step3_error.setText("Please select a scan profile.")
+            self.step3_error.setText(
+                "Please select a scan profile."
+            )
             return
         self.show_step(4)
 
-    # ── Step 4 ──────────────────────────────────────────────
+    # ── Step 4 ───────────────────────────────────────────────
     def build_step4(self):
         self.add_title(
             "Step 4 — Select Tools",
@@ -577,9 +621,12 @@ class ScanWizard(QWidget):
         self.add_step_indicator(4)
 
         action_row = QHBoxLayout()
+
         select_all_btn = QPushButton("Select All")
         select_all_btn.setObjectName("smallBtn")
-        select_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        select_all_btn.setCursor(
+            Qt.CursorShape.PointingHandCursor
+        )
         select_all_btn.clicked.connect(self.select_all_tools)
         action_row.addWidget(select_all_btn)
 
@@ -598,8 +645,8 @@ class ScanWizard(QWidget):
         self.main_layout.addLayout(action_row)
         self.main_layout.addSpacing(12)
 
-        self.tool_cards  = {}
-        tools_list = list(TOOLS.items())
+        self.tool_cards = {}
+        tools_list      = list(TOOLS.items())
 
         for i in range(0, len(tools_list), 2):
             row = QHBoxLayout()
@@ -638,7 +685,8 @@ class ScanWizard(QWidget):
 
     def update_tool_count(self):
         selected = sum(
-            1 for c in self.tool_cards.values() if c.is_selected()
+            1 for c in self.tool_cards.values()
+            if c.is_selected()
         )
         total = len(self.tool_cards)
         self.tool_count_lbl.setText(
@@ -668,7 +716,7 @@ class ScanWizard(QWidget):
         self.scan_config['tools'] = selected
         self.show_step(5)
 
-    # ── Step 5 ──────────────────────────────────────────────
+    # ── Step 5 ───────────────────────────────────────────────
     def build_step5(self):
         self.add_title(
             "Step 5 — Confirm & Start Scan",
@@ -686,15 +734,13 @@ class ScanWizard(QWidget):
                     break
 
         details = [
-            ("Target",       self.scan_config.get('target', '')),
-            ("Scan Name",    self.scan_config.get('name', '')),
-            ("Folder",       folder_name),
-            ("Profile",      self.scan_config.get('profile', '')),
-            ("Tools",        ', '.join(
+            ("Target",    self.scan_config.get('target', '')),
+            ("Scan Name", self.scan_config.get('name', '')),
+            ("Folder",    folder_name),
+            ("Profile",   self.scan_config.get('profile', '')),
+            ("Tools",     ', '.join(
                 self.scan_config.get('tools', [])
             )),
-            ("Approval Ref",
-             self.scan_config.get('approval_ref') or 'N/A'),
         ]
 
         for label, value in details:
@@ -795,26 +841,6 @@ class ScanWizard(QWidget):
                 border-color: #e94560;
                 color: #e94560;
             }
-            #nextBtn {
-                background-color: #e94560;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 11px 28px;
-                font-size: 13px;
-                font-weight: bold;
-            }
-            #nextBtn:hover { background-color: #c73652; }
-            #backBtn {
-                background-color: #e94560;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 11px 28px;
-                font-size: 13px;
-                font-weight: bold;
-            }
-            #backBtn:hover { background-color: #c73652; }
             #errorLabel {
                 color: #e94560;
                 font-size: 12px;
@@ -825,7 +851,10 @@ class ScanWizard(QWidget):
                 font-size: 12px;
                 margin-top: 4px;
             }
-            #confirmLabel { color: #8b949e; font-size: 13px; }
+            #confirmLabel {
+                color: #8b949e;
+                font-size: 13px;
+            }
             #confirmValue {
                 color: #e6edf3;
                 font-size: 13px;

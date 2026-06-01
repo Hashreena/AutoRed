@@ -1,7 +1,6 @@
 import sys
 import math
 import random
-from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QPushButton, QLabel, QFrame
@@ -27,20 +26,22 @@ class FloatingTool(QLabel):
         self.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents
         )
-        self.dx = 0
-        self.dy = 0
-        self.elapsed = 0
-        self.duration = 6000
-        self.max_opacity = 0.3
-        self.start_x = 0
-        self.start_y = 0
+        self.dx           = 0
+        self.dy           = 0
+        self.elapsed      = 0
+        self.duration     = 6000
+        self.max_opacity  = 0.3
+        self.start_x      = 0
+        self.start_y      = 0
 
 
 class WelcomeScreen(QWidget):
-    def __init__(self, on_new_scan=None, on_open_scan=None):
+    def __init__(self, on_new_scan=None, on_open_scan=None,
+                 on_authorized_targets=None):
         super().__init__()
-        self.on_new_scan  = on_new_scan
-        self.on_open_scan = on_open_scan
+        self.on_new_scan            = on_new_scan
+        self.on_open_scan           = on_open_scan
+        self.on_authorized_targets  = on_authorized_targets
         self.tools = [
             'Nmap', 'Subfinder', 'httpx', 'WhatWeb', 'ffuf',
             'Nikto', 'theHarvester', 'DNSrecon', 'Gobuster',
@@ -67,9 +68,12 @@ class WelcomeScreen(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
 
         self.center_widget = QWidget(self)
-        self.center_widget.setStyleSheet("background: transparent;")
+        self.center_widget.setStyleSheet(
+            "background: transparent;"
+        )
         self.center_widget.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents, False
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            False
         )
 
         layout = QVBoxLayout(self.center_widget)
@@ -79,33 +83,45 @@ class WelcomeScreen(QWidget):
 
         layout.addStretch()
 
+        # ── Logo ─────────────────────────────────────────
         self.logo_label = QLabel("AutoRed")
-        self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.logo_label.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
         self.logo_label.setStyleSheet(
-            "color: #e94560; font-size: 52px; font-weight: bold; "
-            "letter-spacing: 4px; background: transparent;"
+            "color: #e94560; font-size: 52px; "
+            "font-weight: bold; letter-spacing: 4px; "
+            "background: transparent;"
         )
         layout.addWidget(self.logo_label)
 
         self.sub_label = QLabel("RECON AUTOMATION PLATFORM")
-        self.sub_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.sub_label.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
         self.sub_label.setStyleSheet(
-            "color: #8b949e; font-size: 12px; font-weight: bold; "
-            "letter-spacing: 5px; background: transparent; "
-            "margin-top: 2px;"
+            "color: #8b949e; font-size: 12px; "
+            "font-weight: bold; letter-spacing: 5px; "
+            "background: transparent; margin-top: 2px;"
         )
         layout.addWidget(self.sub_label)
+
         layout.addSpacing(30)
 
+        # ── Typing animation ──────────────────────────────
         self.typing_label = QLabel("")
-        self.typing_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.typing_label.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
         self.typing_label.setStyleSheet(
             "color: #8b949e; font-size: 13px; "
             "background: transparent; min-height: 22px;"
         )
         layout.addWidget(self.typing_label)
+
         layout.addSpacing(30)
 
+        # ── Buttons row 1 — New Scan + Open Scan ─────────
         btn_row = QHBoxLayout()
         btn_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
         btn_row.setSpacing(12)
@@ -155,18 +171,52 @@ class WelcomeScreen(QWidget):
         btn_row.addWidget(open_btn)
 
         layout.addLayout(btn_row)
-        layout.addSpacing(20)
 
+        layout.addSpacing(10)
+
+        # ── Buttons row 2 — Authorized Targets ───────────
+        auth_row = QHBoxLayout()
+        auth_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        auth_btn = QPushButton("🛡️  Authorized Targets Manager")
+        auth_btn.setFixedHeight(36)
+        auth_btn.setMinimumWidth(220)
+        auth_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        auth_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1d9e75;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 20px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #178a64; }
+            QPushButton:pressed { background-color: #126b4e; }
+        """)
+        if self.on_authorized_targets:
+            auth_btn.clicked.connect(
+                self.on_authorized_targets
+            )
+        auth_row.addWidget(auth_btn)
+        layout.addLayout(auth_row)
+
+        layout.addSpacing(16)
+
+        # ── Tagline ───────────────────────────────────────
         tagline = QLabel(
             "12 tools  ·  automated  ·  "
             "professional reports  ·  APU FYP 2026"
         )
         tagline.setAlignment(Qt.AlignmentFlag.AlignCenter)
         tagline.setStyleSheet(
-            "color: #8b949e; font-size: 10px; font-weight: bold; "
-            "letter-spacing: 1px; background: transparent;"
+            "color: #8b949e; font-size: 10px; "
+            "font-weight: bold; letter-spacing: 1px; "
+            "background: transparent;"
         )
         layout.addWidget(tagline)
+
         layout.addStretch()
 
     def start_animations(self):
@@ -188,13 +238,16 @@ class WelcomeScreen(QWidget):
     def spawn_tool(self):
         if not self.isVisible():
             return
-        w = self.width() or 900
-        h = self.height() or 650
-
-        tool = FloatingTool(random.choice(self.tools), self)
+        w    = self.width() or 900
+        h    = self.height() or 650
+        tool = FloatingTool(
+            random.choice(self.tools), self
+        )
         tool.adjustSize()
 
-        zone = random.choice(['top', 'bottom', 'left', 'right'])
+        zone = random.choice(
+            ['top', 'bottom', 'left', 'right']
+        )
         if zone == 'top':
             start_x = random.randint(20, max(20, w - 120))
             start_y = random.randint(10, int(h * 0.18))
@@ -212,8 +265,8 @@ class WelcomeScreen(QWidget):
             )
             start_y = random.randint(20, max(20, h - 40))
 
-        angle = random.uniform(0, math.pi * 2)
-        speed = random.uniform(20, 50)
+        angle        = random.uniform(0, math.pi * 2)
+        speed        = random.uniform(20, 50)
         tool.dx          = math.cos(angle) * speed
         tool.dy          = math.sin(angle) * speed
         tool.start_x     = start_x
@@ -230,20 +283,23 @@ class WelcomeScreen(QWidget):
             self.center_widget.raise_()
 
     def update_floats(self):
-        dt = 30
+        dt        = 30
         to_remove = []
+
         for tool in self.floating_labels:
             tool.elapsed += dt
             t = tool.elapsed / tool.duration
             if t >= 1:
                 to_remove.append(tool)
                 continue
+
             if t < 0.15:
                 ease = t / 0.15
             elif t > 0.85:
                 ease = (1 - t) / 0.15
             else:
                 ease = 1.0
+
             opacity = ease * tool.max_opacity
             tool.setWindowOpacity(opacity)
             x = tool.start_x + tool.dx * t
@@ -261,7 +317,9 @@ class WelcomeScreen(QWidget):
     def update_typing(self):
         if self.typing_paused:
             return
+
         phrase = self.phrases[self.phrase_index]
+
         if not self.deleting:
             self.char_index += 1
             self.typing_label.setText(
@@ -281,6 +339,7 @@ class WelcomeScreen(QWidget):
                 self.phrase_index = (
                     self.phrase_index + 1
                 ) % len(self.phrases)
+
         speed = 35 if self.deleting else 70
         self.type_timer.setInterval(speed)
 
@@ -310,11 +369,14 @@ class WelcomeScreen(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("AutoRed — Recon Automation Platform")
+        self.setWindowTitle(
+            "AutoRed — Recon Automation Platform"
+        )
         self.setMinimumSize(1000, 650)
         self.current_scan_id = None
         self.welcome_screen  = None
         self.chat_btn        = None
+        self.auth_manager    = None
         self.setStyleSheet("background-color: #0d1117;")
         self.init_ui()
 
@@ -348,8 +410,9 @@ class MainWindow(QMainWindow):
         self.clear_content()
         self.setStyleSheet("background-color: #0d1117;")
         self.welcome_screen = WelcomeScreen(
-            on_new_scan  = self.open_new_scan,
-            on_open_scan = self.open_existing_scan,
+            on_new_scan           = self.open_new_scan,
+            on_open_scan          = self.open_existing_scan,
+            on_authorized_targets = self.open_authorized_targets,
         )
         self.main_layout.addWidget(self.welcome_screen)
         QTimer.singleShot(100, self.add_chat_button)
@@ -405,6 +468,19 @@ class MainWindow(QMainWindow):
                 color: #e94560;
                 border-left: 3px solid #e94560;
             }
+            #authSideBtn {
+                background-color: #1d9e7533;
+                color: #1d9e75;
+                border: none;
+                border-left: 3px solid #1d9e75;
+                padding: 12px 20px;
+                text-align: left;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            #authSideBtn:hover {
+                background-color: #1d9e7555;
+            }
             #chatSideBtn {
                 background-color: #e94560;
                 color: white;
@@ -415,9 +491,7 @@ class MainWindow(QMainWindow):
                 font-size: 13px;
                 font-weight: bold;
             }
-            #chatSideBtn:hover {
-                background-color: #c73652;
-            }
+            #chatSideBtn:hover { background-color: #c73652; }
             #contentArea { background-color: #0d1117; }
         """
 
@@ -425,7 +499,7 @@ class MainWindow(QMainWindow):
         self.clear_content()
         self.setStyleSheet(self.get_app_stylesheet())
 
-        wrapper = QWidget()
+        wrapper        = QWidget()
         wrapper_layout = QHBoxLayout(wrapper)
         wrapper_layout.setContentsMargins(0, 0, 0, 0)
         wrapper_layout.setSpacing(0)
@@ -437,7 +511,9 @@ class MainWindow(QMainWindow):
         self.content_area.setObjectName("contentArea")
         self.content_layout = QVBoxLayout(self.content_area)
         self.content_layout.setContentsMargins(0, 0, 0, 0)
-        self.content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.content_layout.setAlignment(
+            Qt.AlignmentFlag.AlignTop
+        )
         wrapper_layout.addWidget(self.content_area)
 
         self.main_layout.addWidget(wrapper)
@@ -467,6 +543,7 @@ class MainWindow(QMainWindow):
         divider.setFrameShape(QFrame.Shape.HLine)
         divider.setObjectName("divider")
         layout.addWidget(divider)
+
         layout.addSpacing(20)
 
         buttons = [
@@ -474,6 +551,7 @@ class MainWindow(QMainWindow):
             ("Open Existing Scan", self.open_existing_scan),
             ("Home",               self.show_welcome),
         ]
+
         for label, handler in buttons:
             btn = QPushButton(label)
             btn.setObjectName("sidebarBtn")
@@ -481,6 +559,16 @@ class MainWindow(QMainWindow):
             btn.clicked.connect(handler)
             layout.addWidget(btn)
             layout.addSpacing(5)
+
+        layout.addSpacing(10)
+
+        # ── Authorized Targets button in sidebar ──────────
+        auth_btn = QPushButton("🛡️  Authorized Targets")
+        auth_btn.setObjectName("authSideBtn")
+        auth_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        auth_btn.clicked.connect(self.open_authorized_targets)
+        layout.addWidget(auth_btn)
+        layout.addSpacing(5)
 
         layout.addStretch()
 
@@ -491,6 +579,16 @@ class MainWindow(QMainWindow):
         layout.addWidget(chat_btn)
 
         return sidebar
+
+    def open_authorized_targets(self):
+        from gui.authorized_targets import (
+            AuthorizedTargetsManager
+        )
+        self.auth_manager = AuthorizedTargetsManager()
+        self.auth_manager.setMinimumSize(700, 580)
+        self.auth_manager.show()
+        self.auth_manager.raise_()
+        self.auth_manager.activateWindow()
 
     def clear_content_area(self):
         if hasattr(self, 'content_layout'):
@@ -585,7 +683,7 @@ class MainWindow(QMainWindow):
 
 
 def main():
-    app = QApplication(sys.argv)
+    app    = QApplication(sys.argv)
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
