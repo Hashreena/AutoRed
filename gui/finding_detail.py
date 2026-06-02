@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTextEdit, QFrame, QScrollArea,
+    QMessageBox,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl
 from PyQt6.QtGui import QDesktopServices
@@ -13,6 +14,10 @@ SEVERITY_COLORS = {
     'Low':      '#ffd700',
     'Info':     '#4a9eff',
 }
+
+TAG_COLOR  = '#ffffff'
+TAG_BG     = '#1a3a5c'
+TAG_BORDER = '#2d6a9f'
 
 
 class EnrichWorker(QThread):
@@ -28,8 +33,8 @@ class EnrichWorker(QThread):
             from backend.cve_enricher import (
                 enrich_finding, get_attack_path_ai
             )
-            result      = enrich_finding(self.finding)
-            nvd_best    = result.get('nvd_best')
+            result         = enrich_finding(self.finding)
+            nvd_best       = result.get('nvd_best')
             attack, verify = get_attack_path_ai(
                 self.finding, nvd_best
             )
@@ -82,8 +87,8 @@ class FindingDetail(QWidget):
         layout.setContentsMargins(30, 20, 30, 30)
         layout.setSpacing(14)
 
-        # ── Back button ──────────────────────────────────────
-        top_row = QHBoxLayout()
+        # ── Back button ──────────────────────────────────
+        top_row  = QHBoxLayout()
         back_btn = QPushButton("← Back to Dashboard")
         back_btn.setObjectName("backBtn")
         back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -92,9 +97,9 @@ class FindingDetail(QWidget):
         top_row.addStretch()
         layout.addLayout(top_row)
 
-        # ── Severity badge + title ───────────────────────────
-        severity = self.finding.get('severity', 'Info')
-        color    = SEVERITY_COLORS.get(severity, '#888')
+        # ── Severity badge + title ───────────────────────
+        severity  = self.finding.get('severity', 'Info')
+        color     = SEVERITY_COLORS.get(severity, '#888')
 
         sev_badge = QLabel(f"  {severity}  ")
         sev_badge.setStyleSheet(
@@ -114,7 +119,7 @@ class FindingDetail(QWidget):
         layout.addWidget(sev_badge)
         layout.addWidget(title_lbl)
 
-        # ── Basic Info ───────────────────────────────────────
+        # ── Basic Info ───────────────────────────────────
         info_frame = self.make_card()
         ifl        = QVBoxLayout(info_frame)
         ifl.setContentsMargins(16, 12, 16, 12)
@@ -147,10 +152,11 @@ class FindingDetail(QWidget):
 
         layout.addWidget(info_frame)
 
-        # ── Threat Intelligence & Exposure Analysis ──────────
+        # ── Threat Intelligence Panel ────────────────────
         layout.addWidget(self.make_section_header(
             "🔍  THREAT INTELLIGENCE & EXPOSURE ANALYSIS",
-            "CVE · CVSS · CWE · Exploitability · Attack Surface"
+            "CVE · CVSS · CWE · Exploitability · "
+            "Attack Surface"
         ))
 
         self.intel_frame  = self.make_card(border='#4a9eff44')
@@ -168,10 +174,11 @@ class FindingDetail(QWidget):
         self.intel_layout.addWidget(self.intel_loading)
         layout.addWidget(self.intel_frame)
 
-        # ── MITRE ATT&CK ─────────────────────────────────────
+        # ── MITRE ATT&CK ─────────────────────────────────
         layout.addWidget(self.make_section_header(
             "💥  MITRE ATT&CK CLASSIFICATION",
-            "Live data from MITRE ATT&CK GitHub dataset (697 techniques)"
+            "Live data from MITRE ATT&CK GitHub dataset "
+            "(697 techniques)"
         ))
 
         self.mitre_frame  = self.make_card(border='#e9456044')
@@ -188,7 +195,7 @@ class FindingDetail(QWidget):
         self.mitre_layout.addWidget(self.mitre_loading)
         layout.addWidget(self.mitre_frame)
 
-        # ── Finding Details ──────────────────────────────────
+        # ── Finding Details ──────────────────────────────
         layout.addWidget(
             self.make_section_header("📋  FINDING DETAILS")
         )
@@ -218,14 +225,14 @@ class FindingDetail(QWidget):
             txt.setMaximumHeight(90)
             layout.addWidget(txt)
 
-        # ── Attack Path ──────────────────────────────────────
+        # ── Attack Path ──────────────────────────────────
         layout.addWidget(self.make_section_header(
             "🤖  ATTACK PATH RECOMMENDATION",
             "AI-generated exploitation planning (Claude API)"
         ))
 
         self.ap_frame = self.make_card(border='#e9456033')
-        ap_fl = QVBoxLayout(self.ap_frame)
+        ap_fl         = QVBoxLayout(self.ap_frame)
         ap_fl.setContentsMargins(16, 12, 16, 12)
 
         self.ap_lbl = self.sel(QLabel(
@@ -240,14 +247,15 @@ class FindingDetail(QWidget):
         ap_fl.addWidget(self.ap_lbl)
         layout.addWidget(self.ap_frame)
 
-        # ── Verification Steps ───────────────────────────────
+        # ── Verification Steps ───────────────────────────
         layout.addWidget(self.make_section_header(
             "✅  HOW TO VERIFY THIS FINDING",
-            "AI-generated manual verification guide for students"
+            "AI-generated manual verification guide "
+            "for students"
         ))
 
         self.verify_frame = self.make_card(border='#1d9e7544')
-        vf_fl = QVBoxLayout(self.verify_frame)
+        vf_fl             = QVBoxLayout(self.verify_frame)
         vf_fl.setContentsMargins(16, 12, 16, 12)
 
         self.verify_lbl = self.sel(QLabel(
@@ -262,10 +270,10 @@ class FindingDetail(QWidget):
         vf_fl.addWidget(self.verify_lbl)
         layout.addWidget(self.verify_frame)
 
-        # ── Technical Notes ──────────────────────────────────
+        # ── Technical Notes ──────────────────────────────
         layout.addWidget(self.make_section_header(
             "📝  YOUR TECHNICAL NOTES",
-            "Add your manual verification results and findings"
+            "Add your manual verification results"
         ))
 
         self.notes_input = QTextEdit()
@@ -403,7 +411,6 @@ class FindingDetail(QWidget):
         self.render_verify_steps(result)
 
     def render_intel(self, result):
-        # Clear loading
         while self.intel_layout.count():
             item = self.intel_layout.takeAt(0)
             if item.widget():
@@ -416,9 +423,11 @@ class FindingDetail(QWidget):
         reason   = result.get('exploit_reason', '')
         is_fb    = nvd.get('is_fallback', False)
         cve_id   = nvd.get('cve_id', '')
-        has_cve  = bool(cve_id and 'No CVE' not in cve_id)
+        has_cve  = bool(
+            cve_id and 'No CVE' not in cve_id
+        )
 
-        # ── Section: CVE ─────────────────────────────────────
+        # ── CVE Section ──────────────────────────────────
         cve_header = QLabel("CVE IDENTIFIER")
         cve_header.setStyleSheet(
             "color: #4a9eff; font-size: 10px; "
@@ -453,25 +462,28 @@ class FindingDetail(QWidget):
             source = (
                 'NVD API (Live)'
                 if not is_fb and not nvd.get('found_by')
-                else 'NVD API — Keyword Match'
+                else 'NVD API Keyword Match'
                 if nvd.get('found_by')
                 else 'Known Vulnerability DB + NVD'
             )
 
             for label, value, col in [
-                ("CVE ID",       cve_id,                         '#4a9eff'),
+                ("CVE ID",
+                 cve_id,                         '#4a9eff'),
                 ("CVSS Score",
-                 f"{score} / 10.0 (v{version})",                sev_color),
-                ("Severity",     severity or 'See score',        sev_color),
-                ("Published",    pub,                            '#e6edf3'),
-                ("Last Updated", mod,                            '#e6edf3'),
-                ("CVSS Vector",  vector,                         '#8b949e'),
-                ("Attack Vector",av,                             '#e6edf3'),
-                ("Complexity",   ac,                             '#e6edf3'),
-                ("Privileges",   pr,                             '#e6edf3'),
-                ("User Interaction", ui,                         '#e6edf3'),
-                ("Weakness",     weak or 'N/A',                  '#e6edf3'),
-                ("Data Source",  source,                         '#555'),
+                 f"{score} / 10.0 (v{version})", sev_color),
+                ("NVD Severity",
+                 severity or 'See CVSS score',   sev_color),
+                ("Published",    pub,             '#e6edf3'),
+                ("Last Updated", mod,             '#e6edf3'),
+                ("CVSS Vector",  vector,          '#8b949e'),
+                ("Attack Vector", av,             '#e6edf3'),
+                ("Complexity",   ac,              '#e6edf3'),
+                ("Privileges",   pr,              '#e6edf3'),
+                ("User Interaction", ui,          '#e6edf3'),
+                ("Weakness (CWE)",
+                 weak or 'N/A',                  '#e6edf3'),
+                ("Data Source",  source,          '#555'),
             ]:
                 if value:
                     self.intel_layout.addLayout(
@@ -479,7 +491,9 @@ class FindingDetail(QWidget):
                     )
 
             if desc:
-                d = self.sel(QLabel(f"NVD Description: {desc}..."))
+                d = self.sel(QLabel(
+                    f"Description: {desc}..."
+                ))
                 d.setWordWrap(True)
                 d.setStyleSheet(
                     "color: #8b949e; font-size: 11px; "
@@ -489,9 +503,13 @@ class FindingDetail(QWidget):
                 self.intel_layout.addWidget(d)
 
             if nvd_url:
-                btn = QPushButton(f"🔗  View on NVD — {cve_id}")
+                btn = QPushButton(
+                    f"🔗  View on NVD — {cve_id}"
+                )
                 btn.setObjectName("nvdBtn")
-                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.setCursor(
+                    Qt.CursorShape.PointingHandCursor
+                )
                 btn.clicked.connect(
                     lambda u=nvd_url:
                     QDesktopServices.openUrl(QUrl(u))
@@ -531,7 +549,7 @@ class FindingDetail(QWidget):
                         )
                     )
 
-        # ── Section: CWE ─────────────────────────────────────
+        # ── CWE Section ──────────────────────────────────
         self.intel_layout.addWidget(self.divider())
 
         cwe_header = QLabel("CWE WEAKNESS CLASSIFICATION")
@@ -568,7 +586,8 @@ class FindingDetail(QWidget):
             cwe_url = cwe_data.get('url', '')
             if cwe_url:
                 cwe_btn = QPushButton(
-                    f"🔗  View on MITRE CWE — {cwe_data['cwe_id']}"
+                    f"🔗  View on MITRE CWE — "
+                    f"{cwe_data['cwe_id']}"
                 )
                 cwe_btn.setObjectName("nvdBtn")
                 cwe_btn.setCursor(
@@ -581,7 +600,7 @@ class FindingDetail(QWidget):
                 self.intel_layout.addWidget(cwe_btn)
         else:
             no_cwe = self.sel(QLabel(
-                "No CWE classification available for this finding."
+                "No CWE classification available."
             ))
             no_cwe.setStyleSheet(
                 "color: #555; font-size: 12px; "
@@ -589,7 +608,7 @@ class FindingDetail(QWidget):
             )
             self.intel_layout.addWidget(no_cwe)
 
-        # ── Section: Exploitability ───────────────────────────
+        # ── Exploitability Section ────────────────────────
         self.intel_layout.addWidget(self.divider())
 
         exp_header = QLabel("EXPLOITABILITY ASSESSMENT")
@@ -607,7 +626,9 @@ class FindingDetail(QWidget):
             'Difficult': '#ffd700',
             'Unknown':   '#555',
         }
-        exp_color = color_map.get(level or 'Unknown', '#555')
+        exp_color = color_map.get(
+            level or 'Unknown', '#555'
+        )
 
         exp_row = QHBoxLayout()
         if level:
@@ -651,12 +672,12 @@ class FindingDetail(QWidget):
             )
             self.intel_layout.addWidget(no_exp)
 
-        # ── Section: Attack Surface ───────────────────────────
+        # ── Attack Surface Section ────────────────────────
         self.intel_layout.addWidget(self.divider())
 
         surf_header = QLabel("ATTACK SURFACE TAGS")
         surf_header.setStyleSheet(
-            "color: #9b59b6; font-size: 10px; "
+            "color: #4a9eff; font-size: 10px; "
             "font-weight: bold; letter-spacing: 2px; "
             "background: transparent; border: none; "
             "margin-top: 4px;"
@@ -666,20 +687,25 @@ class FindingDetail(QWidget):
         if tags:
             tag_row = QHBoxLayout()
             tag_row.setSpacing(8)
+
             for tag in tags:
                 lbl = self.sel(QLabel(f"  {tag}  "))
                 lbl.setStyleSheet(
-                    "background: #9b59b633; color: #9b59b6; "
-                    "border: 1px solid #9b59b6; "
-                    "border-radius: 4px; "
-                    "padding: 4px 8px; font-size: 11px; "
-                    "font-weight: bold;"
+                    f"background: {TAG_BG}; "
+                    f"color: {TAG_COLOR}; "
+                    f"border: 1px solid {TAG_BORDER}; "
+                    f"border-radius: 4px; "
+                    f"padding: 4px 10px; font-size: 11px; "
+                    f"font-weight: bold;"
                 )
                 tag_row.addWidget(lbl)
+
             tag_row.addStretch()
             self.intel_layout.addLayout(tag_row)
         else:
-            no_tags = self.sel(QLabel("No attack surface tags detected."))
+            no_tags = self.sel(QLabel(
+                "No attack surface tags detected."
+            ))
             no_tags.setStyleSheet(
                 "color: #555; font-size: 12px; "
                 "background: transparent; border: none;"
@@ -695,7 +721,7 @@ class FindingDetail(QWidget):
         mitre = result.get('mitre')
         if not mitre:
             lbl = self.sel(QLabel(
-                "No MITRE ATT&CK mapping found for this finding."
+                "No MITRE ATT&CK mapping found."
             ))
             lbl.setStyleSheet(
                 "color: #555; font-size: 12px; "
@@ -709,7 +735,9 @@ class FindingDetail(QWidget):
         tech      = mitre.get('technique', '')
         tech_id   = mitre.get('tech_id', '')
         sub       = mitre.get('subtechnique') or 'N/A'
-        source    = mitre.get('source', 'MITRE ATT&CK GitHub')
+        source    = mitre.get(
+            'source', 'MITRE ATT&CK GitHub'
+        )
 
         for label, value, col in [
             ("Tactic",
@@ -829,6 +857,41 @@ class FindingDetail(QWidget):
         )
         QApplication.clipboard().setText(text)
         print("[+] Finding copied to clipboard")
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Copied!")
+        msg.setText(
+            f"✅ Finding copied to clipboard!\n\n"
+            f"[{severity}] {title[:60]}"
+        )
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setStyleSheet("""
+            QMessageBox {
+                background: #161b22;
+                color: #e6edf3;
+                font-family: Arial;
+            }
+            QLabel {
+                color: #e6edf3;
+                font-size: 13px;
+                background: transparent;
+                border: none;
+            }
+            QPushButton {
+                background: #1d9e75;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 20px;
+                font-size: 12px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background: #178a64;
+            }
+        """)
+        msg.exec()
 
     def go_back(self):
         if self.on_close:

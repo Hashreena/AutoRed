@@ -6,7 +6,9 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 import sys
 import os
 sys.path.insert(
-    0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    0, os.path.abspath(
+        os.path.join(os.path.dirname(__file__), '..')
+    )
 )
 from backend.db import init_db, insert_scan
 
@@ -32,24 +34,36 @@ class ScanWorker(QThread):
             f"[*] Scan started for target: {target}"
         )
         self.log_signal.emit(f"[*] Profile: {profile}")
-        self.log_signal.emit(f"[*] Tools: {', '.join(tools)}")
+        self.log_signal.emit(
+            f"[*] Tools: {', '.join(tools)}"
+        )
         self.log_signal.emit("-" * 50)
 
         from backend.command_builder import build_command
         from backend.runner import run_tool
 
-        output_base = os.path.join('storage', str(self.scan_id))
+        output_base = os.path.join(
+            'storage', str(self.scan_id)
+        )
         os.makedirs(output_base, exist_ok=True)
 
         for tool in tools:
             if self._stop:
-                self.log_signal.emit("[!] Scan stopped by user.")
+                self.log_signal.emit(
+                    "[!] Scan stopped by user."
+                )
                 break
 
             preset  = presets.get(tool, 'quick')
-            command = build_command(tool, target, profile, preset)
-            self.log_signal.emit(f"\n[*] Running {tool}...")
-            self.log_signal.emit(f"[*] Command: {command}")
+            command = build_command(
+                tool, target, profile, preset
+            )
+            self.log_signal.emit(
+                f"\n[*] Running {tool}..."
+            )
+            self.log_signal.emit(
+                f"[*] Command: {command}"
+            )
 
             output_dir = os.path.join(output_base, tool)
             result     = run_tool(
@@ -61,10 +75,15 @@ class ScanWorker(QThread):
                 self.log_signal.emit(
                     f"[+] {tool} finished successfully"
                 )
-                self.tool_done_signal.emit(tool, 'completed')
-                from backend.job_queue import parse_tool_output
+                self.tool_done_signal.emit(
+                    tool, 'completed'
+                )
+                from backend.job_queue import (
+                    parse_tool_output
+                )
                 parse_tool_output(
-                    self.scan_id, tool, result['stdout'], target
+                    self.scan_id, tool,
+                    result['stdout'], target
                 )
                 self.log_signal.emit(
                     f"[+] {tool} findings parsed and saved"
@@ -76,10 +95,11 @@ class ScanWorker(QThread):
                 self.tool_done_signal.emit(tool, status)
 
         from backend.db import get_connection
-        conn = get_connection()
+        conn   = get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE scans SET status='completed' WHERE id=?",
+            "UPDATE scans SET status='completed' "
+            "WHERE id=?",
             (self.scan_id,)
         )
         conn.commit()
@@ -99,7 +119,9 @@ class ScanProgressScreen(QWidget):
         self.on_finished     = on_finished
         self.tool_labels     = {}
         self.completed_tools = 0
-        self.total_tools     = len(config.get('tools', []))
+        self.total_tools     = len(
+            config.get('tools', [])
+        )
         self.scan_id         = None
         self.setStyleSheet(self.get_stylesheet())
         self.init_ui()
@@ -117,10 +139,12 @@ class ScanProgressScreen(QWidget):
         layout.addWidget(title)
         layout.addSpacing(6)
 
-        tools_str   = ', '.join(self.config.get('tools', []))
+        tools_str   = ', '.join(
+            self.config.get('tools', [])
+        )
         profile_lbl = QLabel(
-            f"Profile: {self.config.get('profile', '')}  "
-            f"|  Tools: {tools_str}"
+            f"Profile: {self.config.get('profile', '')} "
+            f" |  Tools: {tools_str}"
         )
         profile_lbl.setObjectName("scanSub")
         profile_lbl.setWordWrap(True)
@@ -155,14 +179,12 @@ class ScanProgressScreen(QWidget):
                 "color: #8b949e; font-size: 12px; "
                 "background: transparent;"
             )
-
             status = QLabel("Queued")
             status.setStyleSheet(
                 "color: #555; font-size: 12px; "
                 "background: transparent;"
             )
             self.tool_labels[tool] = status
-
             row.addWidget(lbl)
             row.addWidget(status)
             row.addStretch()
@@ -186,14 +208,18 @@ class ScanProgressScreen(QWidget):
 
         self.stop_btn = QPushButton("Stop Scan")
         self.stop_btn.setObjectName("stopBtn")
-        self.stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.stop_btn.setCursor(
+            Qt.CursorShape.PointingHandCursor
+        )
         self.stop_btn.clicked.connect(self.stop_scan)
         btn_row.addWidget(self.stop_btn)
         btn_row.addStretch()
 
         self.done_btn = QPushButton("View Findings →")
         self.done_btn.setObjectName("doneBtn")
-        self.done_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.done_btn.setCursor(
+            Qt.CursorShape.PointingHandCursor
+        )
         self.done_btn.setEnabled(False)
         self.done_btn.clicked.connect(self.view_findings)
         btn_row.addWidget(self.done_btn)
@@ -203,16 +229,28 @@ class ScanProgressScreen(QWidget):
     def start_scan(self):
         init_db()
         self.scan_id = insert_scan(
-            name         = self.config.get('name', 'Unnamed Scan'),
+            name         = self.config.get(
+                'name', 'Unnamed Scan'
+            ),
             target       = self.config.get('target', ''),
-            profile      = self.config.get('profile', 'Standard'),
-            approval_ref = self.config.get('approval_ref', ''),
-            folder_id    = self.config.get('folder_id', None)
+            profile      = self.config.get(
+                'profile', 'Standard'
+            ),
+            approval_ref = self.config.get(
+                'approval_ref', ''
+            ),
+            folder_id    = self.config.get(
+                'folder_id', None
+            )
         )
         self.worker = ScanWorker(self.scan_id, self.config)
         self.worker.log_signal.connect(self.append_log)
-        self.worker.tool_done_signal.connect(self.update_tool_status)
-        self.worker.scan_done_signal.connect(self.scan_finished)
+        self.worker.tool_done_signal.connect(
+            self.update_tool_status
+        )
+        self.worker.scan_done_signal.connect(
+            self.scan_finished
+        )
         self.worker.start()
 
     def append_log(self, message):
@@ -225,19 +263,22 @@ class ScanProgressScreen(QWidget):
                 lbl.setText("Done")
                 lbl.setStyleSheet(
                     "color: #3fb950; font-weight: bold; "
-                    "font-size: 12px; background: transparent;"
+                    "font-size: 12px; "
+                    "background: transparent;"
                 )
             elif status in ['failed', 'timeout', 'error']:
                 lbl.setText("Failed")
                 lbl.setStyleSheet(
                     "color: #e94560; font-weight: bold; "
-                    "font-size: 12px; background: transparent;"
+                    "font-size: 12px; "
+                    "background: transparent;"
                 )
             else:
                 lbl.setText("Running...")
                 lbl.setStyleSheet(
                     "color: #ff8c00; font-weight: bold; "
-                    "font-size: 12px; background: transparent;"
+                    "font-size: 12px; "
+                    "background: transparent;"
                 )
         self.completed_tools += 1
         self.overall_progress.setValue(self.completed_tools)
@@ -254,9 +295,10 @@ class ScanProgressScreen(QWidget):
     def send_telegram_notification(self):
         try:
             from backend.db import get_connection
-            from backend.notifier import notify_scan_complete
-
-            conn = get_connection()
+            from backend.notifier import (
+                notify_scan_complete
+            )
+            conn   = get_connection()
             cursor = conn.cursor()
             cursor.execute(
                 'SELECT * FROM findings WHERE scan_id=?',
@@ -279,12 +321,18 @@ class ScanProgressScreen(QWidget):
             if critical > 0 or high > 0:
                 self.append_log(
                     f"\n[*] Sending Telegram alert — "
-                    f"{critical} Critical, {high} High findings..."
+                    f"{critical} Critical, "
+                    f"{high} High findings..."
                 )
-                scan_name = self.config.get('name', 'AutoRed Scan')
-                target    = self.config.get('target', 'Unknown')
-
-                notify_scan_complete(scan_name, target, findings)
+                scan_name = self.config.get(
+                    'name', 'AutoRed Scan'
+                )
+                target = self.config.get(
+                    'target', 'Unknown'
+                )
+                notify_scan_complete(
+                    scan_name, target, findings
+                )
                 self.append_log(
                     "[+] Telegram notification sent!"
                 )
@@ -320,7 +368,10 @@ class ScanProgressScreen(QWidget):
                 font-size: 18px;
                 font-weight: bold;
             }
-            #scanSub { color: #8b949e; font-size: 12px; }
+            #scanSub {
+                color: #8b949e;
+                font-size: 12px;
+            }
             #sectionLbl {
                 color: #e6edf3;
                 font-size: 12px;
@@ -374,5 +425,7 @@ class ScanProgressScreen(QWidget):
                 background-color: #21262d;
                 color: #555;
             }
-            #doneBtn:hover { background-color: #c73652; }
+            #doneBtn:hover {
+                background-color: #c73652;
+            }
         """

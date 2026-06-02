@@ -70,8 +70,8 @@ class PreloadWorker(QThread):
             from backend.cve_enricher import (
                 enrich_finding, get_attack_path_ai
             )
-            result   = enrich_finding(self.finding)
-            nvd_best = result.get('nvd_best')
+            result         = enrich_finding(self.finding)
+            nvd_best       = result.get('nvd_best')
             attack, verify = get_attack_path_ai(
                 self.finding, nvd_best
             )
@@ -96,7 +96,9 @@ class SummaryWorker(QThread):
 
     def run(self):
         try:
-            from gui.ai_chat import load_api_key, clean_markdown
+            from gui.ai_chat import (
+                load_api_key, clean_markdown
+            )
             api_key = load_api_key()
             if not api_key:
                 self.error.emit(
@@ -104,7 +106,6 @@ class SummaryWorker(QThread):
                     "Add ANTHROPIC_API_KEY to your .env file."
                 )
                 return
-
             payload = json.dumps({
                 "model":      "claude-sonnet-4-5-20250929",
                 "max_tokens": 2000,
@@ -112,7 +113,6 @@ class SummaryWorker(QThread):
                     {"role": "user", "content": self.prompt}
                 ],
             }).encode('utf-8')
-
             req = urllib.request.Request(
                 "https://api.anthropic.com/v1/messages",
                 data=payload,
@@ -126,10 +126,11 @@ class SummaryWorker(QThread):
             with urllib.request.urlopen(
                 req, timeout=60
             ) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
+                data = json.loads(
+                    resp.read().decode('utf-8')
+                )
                 text = data['content'][0]['text']
                 self.done.emit(clean_markdown(text))
-
         except urllib.error.HTTPError as e:
             body = e.read().decode('utf-8')
             try:
@@ -164,6 +165,7 @@ class FindingsDashboard(QWidget):
         self.active_workers   = 0
         self.max_concurrent   = 2
         self.queue_index      = 0
+        self.ch_rows          = []
         self.setStyleSheet(self.get_stylesheet())
         self.init_ui()
         self.load_findings()
@@ -173,7 +175,7 @@ class FindingsDashboard(QWidget):
         layout.setContentsMargins(30, 20, 30, 20)
 
         top_row = QHBoxLayout()
-        title = QLabel(
+        title   = QLabel(
             f"Findings Dashboard — Scan #{self.scan_id}"
         )
         title.setObjectName("dashTitle")
@@ -182,16 +184,20 @@ class FindingsDashboard(QWidget):
 
         audit_btn = QPushButton("Audit Log")
         audit_btn.setObjectName("auditBtn")
-        audit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        audit_btn.setCursor(
+            Qt.CursorShape.PointingHandCursor
+        )
         audit_btn.clicked.connect(self.view_audit_log)
         top_row.addWidget(audit_btn)
 
         visualize_btn = QPushButton("Visualize ▾")
         visualize_btn.setObjectName("visualizeBtn")
-        visualize_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        visualize_btn.setCursor(
+            Qt.CursorShape.PointingHandCursor
+        )
         visualize_menu = QMenu(self)
         visualize_menu.setStyleSheet(DROPDOWN_STYLE)
-        charts_action = QAction("View Charts", self)
+        charts_action  = QAction("View Charts", self)
         charts_action.triggered.connect(self.view_charts)
         visualize_menu.addAction(charts_action)
         visualize_btn.setMenu(visualize_menu)
@@ -199,28 +205,24 @@ class FindingsDashboard(QWidget):
 
         export_btn = QPushButton("Export ▾")
         export_btn.setObjectName("exportDropBtn")
-        export_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        export_btn.setCursor(
+            Qt.CursorShape.PointingHandCursor
+        )
         export_menu = QMenu(self)
         export_menu.setStyleSheet(DROPDOWN_STYLE)
-
-        pdf_action = QAction("Export PDF", self)
+        pdf_action  = QAction("Export PDF", self)
         pdf_action.triggered.connect(self.export_pdf)
         export_menu.addAction(pdf_action)
-
         word_action = QAction("Export Word", self)
         word_action.triggered.connect(self.export_docx)
         export_menu.addAction(word_action)
-
         export_menu.addSeparator()
-
         json_action = QAction("Export JSON", self)
         json_action.triggered.connect(self.export_json)
         export_menu.addAction(json_action)
-
-        csv_action = QAction("Export CSV", self)
+        csv_action  = QAction("Export CSV", self)
         csv_action.triggered.connect(self.export_csv_file)
         export_menu.addAction(csv_action)
-
         export_btn.setMenu(export_menu)
         top_row.addWidget(export_btn)
 
@@ -257,13 +259,14 @@ class FindingsDashboard(QWidget):
 
         filter_row.addStretch()
 
-        self.preload_lbl = QLabel("⏳ Loading intelligence...")
+        self.preload_lbl = QLabel(
+            "⏳ Loading intelligence..."
+        )
         self.preload_lbl.setStyleSheet(
             "color: #555; font-size: 10px; "
             "background: transparent; border: none;"
         )
         filter_row.addWidget(self.preload_lbl)
-
         layout.addLayout(filter_row)
         layout.addSpacing(10)
 
@@ -299,11 +302,12 @@ class FindingsDashboard(QWidget):
         layout.addWidget(hint)
 
     def load_findings(self):
-        conn = get_connection()
+        conn   = get_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT id, tool, asset, category, severity, title,
-                   description, evidence, recommendation, status
+            SELECT id, tool, asset, category, severity,
+                   title, description, evidence,
+                   recommendation, status
             FROM findings WHERE scan_id=?
             ORDER BY CASE severity
                 WHEN "Critical" THEN 0
@@ -356,7 +360,6 @@ class FindingsDashboard(QWidget):
         self.preload_done   += 1
         self.active_workers -= 1
         remaining = self.preload_total - self.preload_done
-
         if remaining > 0:
             self.preload_lbl.setText(
                 f"⏳ Loading intelligence... "
@@ -370,14 +373,33 @@ class FindingsDashboard(QWidget):
                 "color: #1d9e75; font-size: 10px; "
                 "background: transparent; border: none;"
             )
-
         print(
             f"[+] Preloaded finding {finding_id} — "
             f"CVE: {result.get('best_cve', 'none')} "
             f"Exploit: {result.get('exploit_level', 'N/A')}"
         )
-
         self.launch_next_workers()
+
+    def stop_all_workers(self):
+        """Safely stop all background threads."""
+        for worker in self.enrich_workers:
+            try:
+                if worker.isRunning():
+                    worker.quit()
+                    worker.wait(2000)
+            except Exception:
+                pass
+        self.enrich_workers.clear()
+        self.active_workers = 0
+
+        if self.summary_worker:
+            try:
+                if self.summary_worker.isRunning():
+                    self.summary_worker.quit()
+                    self.summary_worker.wait(2000)
+            except Exception:
+                pass
+            self.summary_worker = None
 
     def update_summary(self):
         while self.summary_row.count():
@@ -387,7 +409,7 @@ class FindingsDashboard(QWidget):
 
         counts = {}
         for f in self.findings:
-            sev = f['severity']
+            sev         = f['severity']
             counts[sev] = counts.get(sev, 0) + 1
 
         total_card = self.make_card(
@@ -397,13 +419,15 @@ class FindingsDashboard(QWidget):
 
         for severity, color in SEVERITY_COLORS.items():
             count = counts.get(severity, 0)
-            card  = self.make_card(severity, str(count), color)
+            card  = self.make_card(
+                severity, str(count), color
+            )
             self.summary_row.addWidget(card)
 
         self.summary_row.addStretch()
 
     def make_card(self, label, value, color):
-        card = QFrame()
+        card        = QFrame()
         card.setObjectName("summaryCard")
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(15, 10, 15, 10)
@@ -454,7 +478,6 @@ class FindingsDashboard(QWidget):
 
             asset_item  = QTableWidgetItem(finding['asset'])
             title_item  = QTableWidgetItem(finding['title'])
-
             status      = finding['status']
             status_item = QTableWidgetItem(status)
             status_item.setTextAlignment(
@@ -495,18 +518,22 @@ class FindingsDashboard(QWidget):
             finding    = visible[row]
             finding_id = finding.get('id')
             cached     = self.enrich_cache.get(finding_id)
+            self.stop_all_workers()
             self.on_finding_click(finding, cached)
 
     def view_audit_log(self):
         if self.on_audit_click:
+            self.stop_all_workers()
             self.on_audit_click(self.scan_id)
 
     def view_charts(self):
         if self.on_charts_click:
+            self.stop_all_workers()
             self.on_charts_click(self.scan_id)
 
     def view_network_graph(self):
         if self.on_graph_click:
+            self.stop_all_workers()
             self.on_graph_click(self.scan_id)
 
     def export_pdf(self):
@@ -520,7 +547,9 @@ class FindingsDashboard(QWidget):
     def export_docx(self):
         from reports.report_builder import generate_docx
         import subprocess
-        path = f'storage/{self.scan_id}/report/report.docx'
+        path = (
+            f'storage/{self.scan_id}/report/report.docx'
+        )
         os.makedirs(os.path.dirname(path), exist_ok=True)
         generate_docx(self.scan_id, path)
         subprocess.Popen(['xdg-open', path])
@@ -534,7 +563,9 @@ class FindingsDashboard(QWidget):
         export_json(self.scan_id, path)
         msg = QMessageBox()
         msg.setWindowTitle("Export Complete")
-        msg.setText(f"JSON exported!\n\nSaved to:\n{path}")
+        msg.setText(
+            f"JSON exported!\n\nSaved to:\n{path}"
+        )
         msg.exec()
 
     def export_csv_file(self):
@@ -546,15 +577,18 @@ class FindingsDashboard(QWidget):
         export_csv(self.scan_id, path)
         msg = QMessageBox()
         msg.setWindowTitle("Export Complete")
-        msg.setText(f"CSV exported!\n\nSaved to:\n{path}")
+        msg.setText(
+            f"CSV exported!\n\nSaved to:\n{path}"
+        )
         msg.exec()
 
     def show_ai_summary(self):
-        conn = get_connection()
+        conn   = get_connection()
         cursor = conn.cursor()
         cursor.execute('''
             SELECT id, severity, title, description,
-                   recommendation
+                   recommendation, asset, tool,
+                   evidence, category
             FROM findings WHERE scan_id=?
             ORDER BY CASE severity
                 WHEN "Critical" THEN 0
@@ -565,7 +599,8 @@ class FindingsDashboard(QWidget):
         ''', (self.scan_id,))
         findings = cursor.fetchall()
         cursor.execute(
-            'SELECT * FROM scans WHERE id=?', (self.scan_id,)
+            'SELECT * FROM scans WHERE id=?',
+            (self.scan_id,)
         )
         scan = cursor.fetchone()
         conn.close()
@@ -577,43 +612,128 @@ class FindingsDashboard(QWidget):
         for f in findings:
             counts[f[1]] = counts.get(f[1], 0) + 1
 
-        # ── Build enriched findings using cache ──────────────
+        # ── Warn if cache not ready ───────────────────────
+        ch_count  = sum(
+            1 for f in findings
+            if f[1] in ('Critical', 'High')
+        )
+        cached_ch = sum(
+            1 for f in findings
+            if f[1] in ('Critical', 'High')
+            and f[0] in self.enrich_cache
+        )
+        if cached_ch < ch_count:
+            msg = QMessageBox()
+            msg.setWindowTitle("Intelligence Loading")
+            msg.setText(
+                f"Intelligence is still loading "
+                f"({cached_ch}/{ch_count} Critical/High "
+                f"findings ready).\n\n"
+                f"The summary will take longer as missing "
+                f"data will be fetched now.\n\n"
+                f"💡 Tip: Wait for "
+                f"'✅ Intelligence ready' before clicking "
+                f"AI Summary for faster results."
+            )
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.exec()
+
+        # ── Enrich missing Critical/High on demand ────────
+        from backend.cve_enricher import enrich_finding
+        for f in findings:
+            fid      = f[0]
+            severity = f[1]
+            if severity not in ('Critical', 'High'):
+                continue
+            if fid not in self.enrich_cache:
+                try:
+                    finding_dict = {
+                        'id':             fid,
+                        'title':          f[2],
+                        'description':    f[3] or '',
+                        'severity':       severity,
+                        'asset':          f[5] or '',
+                        'tool':           f[6] or '',
+                        'evidence':       f[7] or '',
+                        'recommendation': f[4] or '',
+                        'category':       f[8] or '',
+                    }
+                    result = enrich_finding(finding_dict)
+                    self.enrich_cache[fid] = result
+                except Exception as e:
+                    print(f"[!] Enrich error: {e}")
+
+        # ── Build C&H rows ────────────────────────────────
+        self.ch_rows        = []
         critical_high_lines = []
+
         for f in findings:
             fid      = f[0]
             severity = f[1]
             title    = f[2]
+            desc     = f[3] or ''
 
             if severity not in ('Critical', 'High'):
                 continue
 
             cached   = self.enrich_cache.get(fid, {})
             nvd_best = cached.get('nvd_best')
+            cwe_data = cached.get('cwe_data')
+            mitre    = cached.get('mitre')
+
             cve_id   = 'N/A'
             cvss     = 'N/A'
+            cwe      = 'N/A'
+            mitre_id = 'N/A'
 
             if nvd_best:
                 raw_cve = nvd_best.get('cve_id', 'N/A')
-                if raw_cve and 'No CVE' not in raw_cve:
+                if raw_cve and 'No CVE' not in str(raw_cve):
                     cve_id = raw_cve
-                cvss = nvd_best.get('cvss_score', 'N/A')
+                raw_cvss = nvd_best.get('cvss_score')
+                if raw_cvss:
+                    cvss = str(raw_cvss)
 
-            line = (
+            if cwe_data:
+                cwe = (
+                    f"{cwe_data.get('cwe_id', 'N/A')} — "
+                    f"{cwe_data.get('name', '')}"
+                )
+            elif nvd_best:
+                weak = nvd_best.get('weaknesses', [])
+                if weak:
+                    cwe = weak[0]
+
+            if mitre:
+                tech_id   = mitre.get('tech_id', 'N/A')
+                technique = mitre.get('technique', '')
+                mitre_id  = (
+                    f"{tech_id} {technique}".strip()
+                )
+
+            self.ch_rows.append({
+                'severity': severity,
+                'title':    title,
+                'cve':      cve_id,
+                'cvss':     cvss,
+                'cwe':      cwe,
+                'mitre':    mitre_id,
+                'desc':     desc[:100],
+            })
+
+            critical_high_lines.append(
                 f"[{severity}] {title} "
-                f"| CVE: {cve_id} | CVSS: {cvss}"
+                f"| CVE: {cve_id} | CVSS: {cvss} "
+                f"| CWE: {cwe} | MITRE: {mitre_id}"
             )
-            critical_high_lines.append(line)
 
         critical_high_text = '\n'.join(critical_high_lines)
-
-        all_findings_text = '\n'.join([
-            f"[{f[1]}] {f[2]}"
-            for f in findings
+        all_findings_text  = '\n'.join([
+            f"[{f[1]}] {f[2]}" for f in findings
         ])
 
-        # ── Build references from cache ──────────────────────
         references_text = ''
-        seen_cves = []
+        seen_cves       = []
         for f in findings:
             fid    = f[0]
             cached = self.enrich_cache.get(fid, {})
@@ -626,7 +746,9 @@ class FindingsDashboard(QWidget):
                     cve not in seen_cves
                 ):
                     seen_cves.append(cve)
-                    desc    = nvd.get('description', '')[:80]
+                    desc    = nvd.get(
+                        'description', ''
+                    )[:80]
                     nvd_url = nvd.get('nvd_url', '')
                     references_text += (
                         f"• {cve}: {nvd_url} — {desc}\n"
@@ -647,42 +769,36 @@ class FindingsDashboard(QWidget):
             f"Medium: {counts['Medium']} | "
             f"Low: {counts['Low']} | "
             f"Info: {counts['Info']}\n\n"
-            f"Critical and High Findings "
-            f"(with real CVE and CVSS from NVD):\n"
+            f"Critical and High Findings:\n"
             f"{critical_high_text}\n\n"
             f"All Findings:\n{all_findings_text[:600]}\n\n"
-            f"Known CVE References (from NVD API):\n"
-            f"{references_text if references_text else 'None detected yet'}\n\n"
+            f"Known CVE References:\n"
+            f"{references_text if references_text else 'None'}\n\n"
             f"REQUIRED OUTPUT FORMAT:\n\n"
             f"SCAN OVERVIEW\n"
-            f"• Target: [target ip or domain]\n"
+            f"• Target: [target]\n"
             f"• Scan Date: [date]\n"
-            f"• Profile: [scan profile]\n"
+            f"• Profile: [profile]\n"
             f"• Total Findings: [number]\n"
-            f"• Overall Risk Rating: [level] "
-            f"— [one sentence justification]\n"
-            f"• AI Confidence: [High/Medium/Low] "
-            f"— [one sentence why]\n\n"
+            f"• Overall Risk Rating: [level] — [reason]\n"
+            f"• AI Confidence: [High/Medium/Low] — [reason]\n\n"
             f"CRITICAL & HIGH ISSUES\n"
-            f"• [finding name] (CVSS: [use real CVSS from data above]) "
-            f"— [why dangerous]. CVE: [use real CVE from data above, "
-            f"if N/A write N/A]\n"
-            f"• [list ALL critical and high findings, "
-            f"use the real CVE and CVSS provided]\n\n"
+            f"• [finding] (CVSS: [score]) — [why dangerous]. "
+            f"CVE: [real CVE or N/A]. "
+            f"CWE: [real CWE or N/A]. "
+            f"MITRE: [real MITRE or N/A]\n\n"
             f"BUSINESS IMPACT\n"
-            f"• [what attacker can do, max 4 points]\n\n"
+            f"• [max 4 points]\n\n"
             f"IMMEDIATE ACTIONS\n"
-            f"• [fix action, max 5 points]\n\n"
+            f"• [max 5 points]\n\n"
             f"REFERENCES\n"
-            f"• [use only the real CVE references provided above, "
-            f"do not invent CVE numbers]\n\n"
-            f"IMPORTANT: Only use CVE numbers from the data "
-            f"provided above. Do not generate or guess CVE numbers."
+            f"• [real CVEs only]\n\n"
+            f"Do not invent CVE/CWE/MITRE identifiers."
         )
 
         dialog = QDialog(self)
         dialog.setWindowTitle("AI Security Summary")
-        dialog.setMinimumSize(660, 580)
+        dialog.setMinimumSize(800, 620)
         dialog.setStyleSheet("""
             QDialog {
                 background: #0d1117;
@@ -700,26 +816,13 @@ class FindingsDashboard(QWidget):
         dl.setSpacing(10)
 
         header_row = QHBoxLayout()
-        title_lbl = QLabel("🤖  AI Security Summary")
+        title_lbl  = QLabel("🤖  AI Security Summary")
         title_lbl.setStyleSheet(
             "color: #e94560; font-size: 16px; "
             "font-weight: bold;"
         )
         header_row.addWidget(title_lbl)
         header_row.addStretch()
-
-        cache_count = len(self.enrich_cache)
-        total       = min(len(self.findings), 20)
-        if cache_count < total:
-            cache_lbl = QLabel(
-                f"⏳ Intelligence: {cache_count}/{total} ready"
-            )
-            cache_lbl.setStyleSheet(
-                "color: #ff8c00; font-size: 10px; "
-                "background: transparent; border: none;"
-            )
-            header_row.addWidget(cache_lbl)
-
         dl.addLayout(header_row)
 
         info_lbl = QLabel(
@@ -766,7 +869,9 @@ class FindingsDashboard(QWidget):
         self.scroll_widget.setStyleSheet(
             "background: #0d1117;"
         )
-        self.scroll_layout = QVBoxLayout(self.scroll_widget)
+        self.scroll_layout = QVBoxLayout(
+            self.scroll_widget
+        )
         self.scroll_layout.setContentsMargins(4, 8, 4, 8)
         self.scroll_layout.setSpacing(4)
 
@@ -783,8 +888,8 @@ class FindingsDashboard(QWidget):
         dl.addWidget(scroll)
 
         note_lbl = QLabel(
-            "✅ CVE data sourced from NVD API — "
-            "not AI-generated"
+            "✅ CVE/CWE/MITRE data sourced from NVD API "
+            "and MITRE ATT&CK — not AI-generated"
         )
         note_lbl.setStyleSheet(
             "color: #1d9e75; font-size: 10px; "
@@ -804,21 +909,152 @@ class FindingsDashboard(QWidget):
             }
             QPushButton:hover { background: #c73652; }
         """)
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setCursor(
+            Qt.CursorShape.PointingHandCursor
+        )
         close_btn.clicked.connect(dialog.close)
         btn_row.addWidget(close_btn)
         dl.addLayout(btn_row)
 
         self.summary_worker = SummaryWorker(prompt)
-        self.summary_worker.done.connect(self.render_summary)
+        self.summary_worker.done.connect(
+            self.render_summary
+        )
         self.summary_worker.error.connect(
             lambda e: self.waiting_lbl.setText(
                 f"Could not generate summary:\n\n{e}"
             )
         )
         self.summary_worker.start()
-
         dialog.exec()
+
+    def render_ch_table(self):
+        if not self.ch_rows:
+            return
+
+        tbl = QTableWidget()
+        tbl.setColumnCount(6)
+        tbl.setHorizontalHeaderLabels([
+            'Severity', 'Issue', 'CVE',
+            'CVSS', 'CWE', 'MITRE'
+        ])
+        tbl.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch
+        )
+        tbl.setEditTriggers(
+            QTableWidget.EditTrigger.NoEditTriggers
+        )
+        tbl.verticalHeader().setVisible(False)
+        tbl.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        tbl.setColumnWidth(0, 75)
+        tbl.setColumnWidth(2, 110)
+        tbl.setColumnWidth(3, 55)
+        tbl.setColumnWidth(4, 160)
+        tbl.setColumnWidth(5, 130)
+        tbl.setStyleSheet("""
+            QTableWidget {
+                background: #161b22;
+                border: 1px solid #e9456044;
+                border-radius: 6px;
+                gridline-color: #21262d;
+            }
+            QHeaderView::section {
+                background: #21262d;
+                color: #8b949e;
+                padding: 6px 8px;
+                border: none;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QTableWidget::item {
+                padding: 4px 8px;
+                background: #0d1117;
+                color: #e6edf3;
+            }
+            QTableWidget::item:selected {
+                background: #21262d;
+                color: #e94560;
+            }
+        """)
+
+        for row_data in self.ch_rows:
+            row   = tbl.rowCount()
+            tbl.insertRow(row)
+
+            sev   = row_data['severity']
+            color = SEVERITY_COLORS.get(sev, '#888')
+
+            sev_item = QTableWidgetItem(sev)
+            sev_item.setForeground(QColor(color))
+            sev_item.setTextAlignment(
+                Qt.AlignmentFlag.AlignCenter
+            )
+
+            title_item = QTableWidgetItem(
+                row_data['title']
+            )
+
+            cve_item = QTableWidgetItem(row_data['cve'])
+            cve_item.setTextAlignment(
+                Qt.AlignmentFlag.AlignCenter
+            )
+            if row_data['cve'] != 'N/A':
+                cve_item.setForeground(QColor('#4a9eff'))
+            else:
+                cve_item.setForeground(QColor('#555'))
+
+            cvss_item = QTableWidgetItem(row_data['cvss'])
+            cvss_item.setTextAlignment(
+                Qt.AlignmentFlag.AlignCenter
+            )
+            try:
+                score = float(row_data['cvss'])
+                if score >= 9.0:
+                    cvss_item.setForeground(
+                        QColor('#8b0000')
+                    )
+                elif score >= 7.0:
+                    cvss_item.setForeground(
+                        QColor('#e94560')
+                    )
+                elif score >= 4.0:
+                    cvss_item.setForeground(
+                        QColor('#ff8c00')
+                    )
+                else:
+                    cvss_item.setForeground(
+                        QColor('#ffd700')
+                    )
+            except Exception:
+                cvss_item.setForeground(QColor('#555'))
+
+            cwe_item = QTableWidgetItem(
+                row_data.get('cwe', 'N/A')
+            )
+            cwe_item.setForeground(QColor('#ff8c00'))
+
+            mitre_item = QTableWidgetItem(
+                row_data.get('mitre', 'N/A')
+            )
+            mitre_item.setForeground(QColor('#e94560'))
+
+            tbl.setItem(row, 0, sev_item)
+            tbl.setItem(row, 1, title_item)
+            tbl.setItem(row, 2, cve_item)
+            tbl.setItem(row, 3, cvss_item)
+            tbl.setItem(row, 4, cwe_item)
+            tbl.setItem(row, 5, mitre_item)
+            tbl.setRowHeight(row, 32)
+
+        max_rows   = min(len(self.ch_rows), 10)
+        tbl_height = 38 + (max_rows * 33)
+        tbl.setMaximumHeight(tbl_height)
+
+        self.scroll_layout.insertWidget(
+            self.scroll_layout.count() - 1, tbl
+        )
 
     def render_summary(self, text):
         while self.scroll_layout.count() > 1:
@@ -828,7 +1064,10 @@ class FindingsDashboard(QWidget):
 
         self.waiting_lbl.hide()
 
-        lines = text.strip().split('\n')
+        lines               = text.strip().split('\n')
+        in_ch_section       = False
+        ch_section_rendered = False
+
         for line in lines:
             line = line.strip()
             if not line:
@@ -849,6 +1088,14 @@ class FindingsDashboard(QWidget):
             )
 
             if is_section:
+                is_ch = any(
+                    upper.startswith(k)
+                    for k in [
+                        'CRITICAL & HIGH',
+                        'CRITICAL ISSUES',
+                    ]
+                )
+
                 color = '#e6edf3'
                 for k, c in SECTION_COLORS.items():
                     if upper.startswith(k):
@@ -866,38 +1113,49 @@ class FindingsDashboard(QWidget):
                     self.scroll_layout.count() - 1, lbl
                 )
 
-                div = QFrame()
-                div.setFrameShape(QFrame.Shape.HLine)
-                div.setFixedHeight(1)
-                div.setStyleSheet(
+                sec_div = QFrame()
+                sec_div.setFrameShape(QFrame.Shape.HLine)
+                sec_div.setFixedHeight(1)
+                sec_div.setStyleSheet(
                     f"background: {color}55; border: none;"
                 )
                 self.scroll_layout.insertWidget(
-                    self.scroll_layout.count() - 1, div
+                    self.scroll_layout.count() - 1,
+                    sec_div
                 )
 
-            elif line.startswith('•'):
+                if is_ch:
+                    in_ch_section       = True
+                    ch_section_rendered = False
+                else:
+                    in_ch_section = False
+
+            elif in_ch_section and line.startswith('•'):
+                if not ch_section_rendered:
+                    self.render_ch_table()
+                    ch_section_rendered = True
+
+            else:
+                in_ch_section = False
                 lbl = QLabel(line)
                 lbl.setWordWrap(True)
                 lbl.setTextInteractionFlags(
                     Qt.TextInteractionFlag.TextSelectableByMouse
                 )
-                lbl.setStyleSheet(
-                    "color: #e6edf3; font-size: 12px; "
-                    "background: transparent; border: none; "
-                    "padding-left: 10px; margin-top: 2px;"
-                )
-                self.scroll_layout.insertWidget(
-                    self.scroll_layout.count() - 1, lbl
-                )
-
-            else:
-                lbl = QLabel(line)
-                lbl.setWordWrap(True)
-                lbl.setStyleSheet(
-                    "color: #8b949e; font-size: 12px; "
-                    "background: transparent; border: none;"
-                )
+                if line.startswith('•'):
+                    lbl.setStyleSheet(
+                        "color: #e6edf3; font-size: 12px; "
+                        "background: transparent; "
+                        "border: none; "
+                        "padding-left: 10px; "
+                        "margin-top: 2px;"
+                    )
+                else:
+                    lbl.setStyleSheet(
+                        "color: #8b949e; font-size: 12px; "
+                        "background: transparent; "
+                        "border: none;"
+                    )
                 self.scroll_layout.insertWidget(
                     self.scroll_layout.count() - 1, lbl
                 )
