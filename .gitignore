@@ -21,5 +21,13 @@ autored.db
 # Environment
 .env
 
-# Storage
+# Storage — scan outputs and cache
+storage/
+!storage/.gitkeep
+
+# MITRE cache
+backend/mitre_attack_cache.json
 storage/mitre_attack_cache.json
+
+# Logs
+*.log

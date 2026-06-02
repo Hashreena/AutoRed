@@ -1,3 +1,0 @@
-
---- STDERR ---
-[1m[31mERROR Opening: http://192.168.112.130 - No route to host - connect(2) for "192.168.112.130" port 80[0m
