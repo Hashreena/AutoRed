@@ -1,5 +1,10 @@
+import sys, os
+sys.path.insert(0, os.path.abspath(
+    os.path.join(os.path.dirname(__file__), '..')
+))
 import re
 from backend.db import insert_finding, insert_audit_log
+from backend.path_enricher import enrich_path, best_severity, post_enrich_cve
 
 HIGH_INTEREST = [
     'admin', 'administrator', 'login', 'wp-admin', 'phpmyadmin',
@@ -35,10 +40,7 @@ def parse_dirsearch(scan_id, raw_output, target):
 
     for line in lines:
         line = line.strip()
-        if not line:
-            continue
-
-        if line.startswith('#'):
+        if not line or line.startswith('#'):
             continue
 
         match = re.match(
@@ -49,70 +51,87 @@ def parse_dirsearch(scan_id, raw_output, target):
             continue
 
         status_code = int(match.group(1))
-        url = match.group(2).strip()
-
+        url         = match.group(2).strip()
         if '->' in url:
             url = url.split('->')[0].strip()
 
-        severity = get_severity(url, status_code)
+        base_sev = get_severity(url, status_code)
+        path     = url.replace(
+            f'http://{target}', ''
+        ).replace(f'https://{target}', '') or '/'
 
-        path = url.replace(f'http://{target}', '').replace(
-            f'https://{target}', ''
-        )
-        if not path:
-            path = '/'
+        # ── Path enrichment ──────────────────────────────
+        enrichment = enrich_path(url, status_code)
 
-        title = f"Path discovered: {path} [{status_code}]"
-        description = (
-            f"Dirsearch discovered path '{path}' "
-            f"on {target} returning HTTP {status_code}."
-        )
-        evidence = (
-            f"Dirsearch found: {url} "
-            f"— status {status_code}"
-        )
-
-        if severity == 'High':
-            recommendation = (
-                f"Sensitive path '{path}' is accessible. "
-                "Restrict access immediately and review "
-                "authentication controls."
+        if enrichment:
+            severity       = best_severity(base_sev, enrichment['severity'])
+            cwe_id         = enrichment['cwe_id']
+            cvss_score     = enrichment['cvss_score']
+            description    = (
+                f"{enrichment['description']}\n\n"
+                f"URL: {url}  |  HTTP {status_code}\n"
+                f"CWE: {cwe_id}  |  CVSS: {cvss_score}"
             )
-        elif severity == 'Medium':
-            recommendation = (
-                f"Path returns {status_code}. Review access "
-                "controls and ensure proper authentication."
+            recommendation = enrichment['recommendation']
+            title          = (
+                f"[{cwe_id}] Sensitive path: "
+                f"{path} [{status_code}]"
             )
         else:
-            recommendation = (
-                f"Review path '{path}' to confirm "
-                "it should be publicly accessible."
+            severity       = base_sev
+            cwe_id         = None
+            cvss_score     = None
+            description    = (
+                f"Dirsearch discovered path '{path}' "
+                f"on {target} returning HTTP {status_code}."
             )
+            title          = (
+                f"Path discovered: {path} [{status_code}]"
+            )
+            if severity == 'High':
+                recommendation = (
+                    f"Sensitive path '{path}' is accessible. "
+                    "Restrict access immediately."
+                )
+            elif severity == 'Medium':
+                recommendation = (
+                    f"Path returns {status_code}. "
+                    "Review access controls."
+                )
+            else:
+                recommendation = (
+                    f"Review '{path}' to confirm "
+                    "it should be publicly accessible."
+                )
+
+        evidence = f"Dirsearch found: {url} — status {status_code}"
 
         finding = {
-            'scan_id': scan_id,
-            'tool': 'dirsearch',
-            'asset': url,
-            'category': 'directory',
-            'severity': severity,
-            'title': title,
-            'description': description,
-            'evidence': evidence,
-            'recommendation': recommendation
+            'scan_id':        scan_id,
+            'tool':           'dirsearch',
+            'asset':          url,
+            'category':       'directory',
+            'severity':       severity,
+            'title':          title,
+            'description':    description,
+            'evidence':       evidence,
+            'recommendation': recommendation,
         }
         findings.append(finding)
 
         insert_finding(
-            scan_id=scan_id,
-            tool='dirsearch',
-            asset=url,
-            category='directory',
-            severity=severity,
-            title=title,
-            description=description,
-            evidence=evidence,
+            scan_id=scan_id, tool='dirsearch',
+            asset=url, category='directory',
+            severity=severity, title=title,
+            description=description, evidence=evidence,
             recommendation=recommendation
         )
+
+        if cwe_id:
+            post_enrich_cve(
+                scan_id, 'dirsearch', url, cwe_id, cvss_score
+            )
+
         print(f"[{severity.upper()}] {title}")
 
     insert_audit_log(
@@ -122,31 +141,28 @@ def parse_dirsearch(scan_id, raw_output, target):
     print(f"[+] Dirsearch parser done — {len(findings)} findings saved")
     return findings
 
+
 if __name__ == '__main__':
+    import sys, os
+    sys.path.insert(0, os.path.abspath(
+        os.path.join(os.path.dirname(__file__), '..')
+    ))
     from backend.db import init_db
     init_db()
 
-    raw = """# Dirsearch started Fri May 15 10:16:02 2026
-403   299B   http://192.168.112.130/.ht_wsr.txt
-403   302B   http://192.168.112.130/.htaccess.bak1
+    raw = """# Dirsearch started
+403   299B   http://192.168.112.130/.htpasswd
 403   296B   http://192.168.112.130/cgi-bin/
 200   111KB  http://192.168.112.130/doc/
-302     0B   http://192.168.112.130/dvwa/  ->  login.php
+302     0B   http://192.168.112.130/dvwa/
 200    24KB  http://192.168.112.130/mutillidae/
-200    49KB  http://192.168.112.130/phpinfo
 200    49KB  http://192.168.112.130/phpinfo.php
 301   328B   http://192.168.112.130/phpMyAdmin
 200     4KB  http://192.168.112.130/phpMyAdmin/
 403   301B   http://192.168.112.130/server-status
-301   322B   http://192.168.112.130/test
-200   886B   http://192.168.112.130/test/
-301   326B   http://192.168.112.130/tikiwiki"""
+200   886B   http://192.168.112.130/backup/"""
 
-    findings = parse_dirsearch(
-        scan_id=2,
-        raw_output=raw,
-        target='192.168.112.130'
-    )
+    findings = parse_dirsearch(2, raw, '192.168.112.130')
     print(f"\nTotal: {len(findings)}")
     for f in findings:
         print(f"  [{f['severity']}] {f['title']}")

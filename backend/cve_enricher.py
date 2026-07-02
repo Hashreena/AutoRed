@@ -2,8 +2,35 @@ import json
 import subprocess
 import re
 import os
+import time
 import urllib.parse
 from datetime import datetime
+
+
+# ── NVD API key (optional but strongly recommended) ──────────
+# Without a key NVD throttles to ~5 requests / 30s, which makes the
+# CVE lookups time out and silently return nothing. Get a free key at
+# https://nvd.nist.gov/developers/request-an-api-key and add it to .env:
+#     NVD_API_KEY=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+def load_nvd_key():
+    key = os.environ.get('NVD_API_KEY', '')
+    if key:
+        return key.strip()
+    env_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+    if os.path.exists(env_path):
+        try:
+            with open(env_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('NVD_API_KEY='):
+                        return line.split('=', 1)[1].strip()
+        except Exception:
+            pass
+    return ''
+
+
+_NVD_KEY  = load_nvd_key()
+_NVD_LAST = [0.0]   # timestamp of last request, for rate spacing
 
 
 # ── Configuration Weakness Keywords ──────────────────────────
@@ -34,8 +61,16 @@ KNOWN_CVE_SIGNATURES = [
     'apache struts', 'jenkins', 'jboss',
     'weblogic', 'coldfusion',
     'drupal', 'joomla', 'wordpress plugin',
-    'openssl', 'java rmi', 'rmi registry',
+    'openssl', 'java rmi', 'java-rmi', 'rmi registry',
     'ingreslock', 'tomcat', 'bindshell', 'bind shell',
+    # Nikto/whatweb version-disclosure patterns
+    'appears to be outdated',
+    'technology detected: apache',
+    'technology detected: php',
+    'technology detected: nginx',
+    'technology detected: mysql',
+    'technology detected: openssl',
+    'apache/', 'php/', 'nginx/',
 ]
 
 
@@ -64,450 +99,6 @@ def has_known_cve_signature(finding):
     )
 
 
-# ── CWE/Protocol Fallback DB ──────────────────────────────────
-PROTOCOL_WEAKNESS_DB = {
-    'telnet': {
-        'cve_id':           'No CVE — Protocol Weakness',
-        'description':      'Telnet transmits all data in cleartext.',
-        'cvss_score':        7.5,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'HIGH',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'LOW',
-        'privileges_req':    'NONE',
-        'user_interaction':  'NONE',
-        'exploitability':    3.9,
-        'exploit_level':     'Easy',
-        'exploit_reason':    'Cleartext protocol, remotely exploitable',
-        'weaknesses':  ['CWE-319 — Cleartext Transmission'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/319.html',
-        'is_fallback': True,
-    },
-    'ftp': {
-        'cve_id':           'No CVE — Protocol Weakness',
-        'description':      'FTP transmits credentials in cleartext.',
-        'cvss_score':        7.5,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'HIGH',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'LOW',
-        'privileges_req':    'NONE',
-        'user_interaction':  'NONE',
-        'exploitability':    3.9,
-        'exploit_level':     'Easy',
-        'exploit_reason':    'Cleartext credentials, potential anonymous access',
-        'weaknesses':  ['CWE-319 — Cleartext Transmission'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/319.html',
-        'is_fallback': True,
-    },
-    'vnc': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'VNC exposed without authentication.',
-        'cvss_score':        9.8,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'CRITICAL',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'LOW',
-        'privileges_req':    'NONE',
-        'user_interaction':  'NONE',
-        'exploitability':    3.9,
-        'exploit_level':     'Easy',
-        'exploit_reason':    'No authentication, full desktop access',
-        'weaknesses':  ['CWE-306 — Missing Authentication'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/306.html',
-        'is_fallback': True,
-    },
-    'smtp': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'SMTP exposed without authentication.',
-        'cvss_score':        5.3,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'MEDIUM',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'LOW',
-        'privileges_req':    'NONE',
-        'user_interaction':  'NONE',
-        'exploitability':    3.9,
-        'exploit_level':     'Moderate',
-        'exploit_reason':    'User enumeration and open relay possible',
-        'weaknesses':  ['CWE-306 — Missing Authentication'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/306.html',
-        'is_fallback': True,
-    },
-    'mysql': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'MySQL exposed on network.',
-        'cvss_score':        8.8,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'HIGH',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'LOW',
-        'privileges_req':    'LOW',
-        'user_interaction':  'NONE',
-        'exploitability':    3.1,
-        'exploit_level':     'Moderate',
-        'exploit_reason':    'Remotely exploitable, brute force possible',
-        'weaknesses':  ['CWE-284 — Improper Access Control'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/284.html',
-        'is_fallback': True,
-    },
-    'postgresql': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'PostgreSQL with empty or default password.',
-        'cvss_score':        9.8,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'CRITICAL',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'LOW',
-        'privileges_req':    'NONE',
-        'user_interaction':  'NONE',
-        'exploitability':    3.9,
-        'exploit_level':     'Easy',
-        'exploit_reason':    'Default empty password, no auth needed',
-        'weaknesses':  ['CWE-521 — Weak Password Requirements'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/521.html',
-        'is_fallback': True,
-    },
-    'smb': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'SMB exposed, relay attacks possible.',
-        'cvss_score':        8.1,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'HIGH',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'HIGH',
-        'privileges_req':    'NONE',
-        'user_interaction':  'NONE',
-        'exploitability':    2.2,
-        'exploit_level':     'Moderate',
-        'exploit_reason':    'Multiple attack vectors including relay',
-        'weaknesses':  ['CWE-284 — Improper Access Control'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/284.html',
-        'is_fallback': True,
-    },
-    'nfs': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'NFS share mountable without auth.',
-        'cvss_score':        7.5,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'HIGH',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'LOW',
-        'privileges_req':    'NONE',
-        'user_interaction':  'NONE',
-        'exploitability':    3.9,
-        'exploit_level':     'Easy',
-        'exploit_reason':    'No authentication required',
-        'weaknesses':  ['CWE-306 — Missing Authentication'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/306.html',
-        'is_fallback': True,
-    },
-    'directory listing': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'Web server directory listing enabled.',
-        'cvss_score':        5.3,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'MEDIUM',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'LOW',
-        'privileges_req':    'NONE',
-        'user_interaction':  'NONE',
-        'exploitability':    3.9,
-        'exploit_level':     'Easy',
-        'exploit_reason':    'No authentication, browser accessible',
-        'weaknesses':  ['CWE-548 — Information Exposure'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/548.html',
-        'is_fallback': True,
-    },
-    'phpinfo': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'phpinfo() page publicly accessible.',
-        'cvss_score':        5.3,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'MEDIUM',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'LOW',
-        'privileges_req':    'NONE',
-        'user_interaction':  'NONE',
-        'exploitability':    3.9,
-        'exploit_level':     'Easy',
-        'exploit_reason':    'No authentication, directly accessible',
-        'weaknesses':  ['CWE-200 — Information Exposure'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/200.html',
-        'is_fallback': True,
-    },
-    'ssh': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'SSH service exposed.',
-        'cvss_score':        5.9,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'MEDIUM',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'HIGH',
-        'privileges_req':    'NONE',
-        'user_interaction':  'NONE',
-        'exploitability':    2.2,
-        'exploit_level':     'Difficult',
-        'exploit_reason':    'Requires credentials or known exploit',
-        'weaknesses':  ['CWE-307 — Brute Force'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/307.html',
-        'is_fallback': True,
-    },
-    'webdav': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'WebDAV enabled, file upload possible.',
-        'cvss_score':        9.8,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'CRITICAL',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'LOW',
-        'privileges_req':    'NONE',
-        'user_interaction':  'NONE',
-        'exploitability':    3.9,
-        'exploit_level':     'Easy',
-        'exploit_reason':    'File upload possible, potential RCE',
-        'weaknesses':  ['CWE-434 — Unrestricted File Upload'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/434.html',
-        'is_fallback': True,
-    },
-    'http trace': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'HTTP TRACE enabled — XST possible.',
-        'cvss_score':        5.8,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'MEDIUM',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:N/A:N',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'LOW',
-        'privileges_req':    'NONE',
-        'user_interaction':  'REQUIRED',
-        'exploitability':    2.8,
-        'exploit_level':     'Moderate',
-        'exploit_reason':    'Requires user interaction, bypasses HttpOnly',
-        'weaknesses':  ['CWE-200 — Information Exposure'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/200.html',
-        'is_fallback': True,
-    },
-    'trace': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'HTTP TRACE method enabled.',
-        'cvss_score':        5.8,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'MEDIUM',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:N/A:N',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'LOW',
-        'privileges_req':    'NONE',
-        'user_interaction':  'REQUIRED',
-        'exploitability':    2.8,
-        'exploit_level':     'Moderate',
-        'exploit_reason':    'Bypasses HttpOnly cookie protection',
-        'weaknesses':  ['CWE-200 — Information Exposure'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/200.html',
-        'is_fallback': True,
-    },
-    'mod_negotiation': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'Apache mod_negotiation filename enumeration.',
-        'cvss_score':        5.3,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'MEDIUM',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'LOW',
-        'privileges_req':    'NONE',
-        'user_interaction':  'NONE',
-        'exploitability':    3.9,
-        'exploit_level':     'Easy',
-        'exploit_reason':    'No authentication, information disclosure',
-        'weaknesses':  ['CWE-200 — Information Exposure'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/200.html',
-        'is_fallback': True,
-    },
-    'negotiation': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'Apache mod_negotiation filename enumeration.',
-        'cvss_score':        5.3,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'MEDIUM',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'LOW',
-        'privileges_req':    'NONE',
-        'user_interaction':  'NONE',
-        'exploitability':    3.9,
-        'exploit_level':     'Easy',
-        'exploit_reason':    'No authentication, information disclosure',
-        'weaknesses':  ['CWE-200 — Information Exposure'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/200.html',
-        'is_fallback': True,
-    },
-    'clickjacking': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'Missing X-Frame-Options allows clickjacking.',
-        'cvss_score':        6.1,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'MEDIUM',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'LOW',
-        'privileges_req':    'NONE',
-        'user_interaction':  'REQUIRED',
-        'exploitability':    2.8,
-        'exploit_level':     'Moderate',
-        'exploit_reason':    'Requires user interaction, UI redressing',
-        'weaknesses':  ['CWE-1021 — UI Redressing'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/1021.html',
-        'is_fallback': True,
-    },
-    'x-frame': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'Missing X-Frame-Options allows clickjacking.',
-        'cvss_score':        6.1,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'MEDIUM',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'LOW',
-        'privileges_req':    'NONE',
-        'user_interaction':  'REQUIRED',
-        'exploitability':    2.8,
-        'exploit_level':     'Moderate',
-        'exploit_reason':    'Requires user interaction, UI redressing',
-        'weaknesses':  ['CWE-1021 — UI Redressing'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/1021.html',
-        'is_fallback': True,
-    },
-    'cors': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'CORS misconfiguration detected.',
-        'cvss_score':        7.5,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'HIGH',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'LOW',
-        'privileges_req':    'NONE',
-        'user_interaction':  'NONE',
-        'exploitability':    3.9,
-        'exploit_level':     'Easy',
-        'exploit_reason':    'Cross-origin data theft possible',
-        'weaknesses':  ['CWE-942 — Permissive CORS Policy'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/942.html',
-        'is_fallback': True,
-    },
-    'ssl': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'SSL/TLS misconfiguration detected.',
-        'cvss_score':        7.4,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'HIGH',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'HIGH',
-        'privileges_req':    'NONE',
-        'user_interaction':  'NONE',
-        'exploitability':    2.2,
-        'exploit_level':     'Difficult',
-        'exploit_reason':    'Requires MITM, traffic decryption',
-        'weaknesses':  ['CWE-326 — Weak Encryption'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/326.html',
-        'is_fallback': True,
-    },
-    'information disclosure': {
-        'cve_id':           'No CVE — Configuration Weakness',
-        'description':      'Sensitive information disclosed.',
-        'cvss_score':        5.3,
-        'cvss_version':      '3.1',
-        'cvss_severity':     'MEDIUM',
-        'cvss_vector':       'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N',
-        'published':         'N/A',
-        'last_modified':     'N/A',
-        'attack_vector':     'NETWORK',
-        'attack_complexity': 'LOW',
-        'privileges_req':    'NONE',
-        'user_interaction':  'NONE',
-        'exploitability':    3.9,
-        'exploit_level':     'Easy',
-        'exploit_reason':    'Passive gathering, no auth needed',
-        'weaknesses':  ['CWE-200 — Information Exposure'],
-        'references':  [],
-        'nvd_url':     'https://cwe.mitre.org/data/definitions/200.html',
-        'is_fallback': True,
-    },
-}
 
 
 def extract_cve_from_text(text):
@@ -623,24 +214,60 @@ def parse_nvd_response(data):
 
 
 def nvd_curl(url):
-    try:
-        result = subprocess.run(
-            [
-                'curl', '-s', '--max-time', '15',
-                '-H', 'User-Agent: AutoRed/1.0',
-                url
-            ],
-            capture_output=True,
-            text=True,
-            timeout=20
-        )
-        if result.returncode != 0 or not result.stdout.strip():
-            return None
-        if result.stdout.strip().startswith('<'):
-            return None
-        return json.loads(result.stdout)
-    except Exception:
-        return None
+    """Robust NVD API GET.
+
+    Adds the API key (if configured), spaces requests to respect NVD
+    rate limits, retries with backoff on throttling/timeouts, and prints
+    a clear reason on failure instead of silently returning None.
+    """
+    cmd = [
+        'curl', '-s', '--max-time', '40',
+        '-H', 'User-Agent: AutoRed/1.0',
+        '-H', 'Accept: application/json',
+    ]
+    if _NVD_KEY:
+        cmd += ['-H', f'apiKey: {_NVD_KEY}']
+    cmd.append(url)
+
+    # Space out requests: NVD allows ~5/30s without a key, ~50/30s with.
+    min_gap = 0.8 if _NVD_KEY else 6.5
+    elapsed = time.time() - _NVD_LAST[0]
+    if elapsed < min_gap:
+        time.sleep(min_gap - elapsed)
+
+    for attempt in range(4):
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=50
+            )
+            _NVD_LAST[0] = time.time()
+            out = (result.stdout or '').strip()
+
+            if result.returncode != 0:
+                print(f"[!] NVD curl rc={result.returncode} "
+                      f"(attempt {attempt + 1}/4)")
+            elif not out:
+                hint = ("  → add NVD_API_KEY to .env to stop throttling"
+                        if not _NVD_KEY else "")
+                print(f"[!] NVD empty response — likely rate limit "
+                      f"(attempt {attempt + 1}/4){hint}")
+            elif out.startswith('<'):
+                print(f"[!] NVD returned HTML, not JSON "
+                      f"(attempt {attempt + 1}/4)")
+            else:
+                return json.loads(out)
+        except subprocess.TimeoutExpired:
+            print(f"[!] NVD curl timed out (attempt {attempt + 1}/4)")
+        except json.JSONDecodeError:
+            print(f"[!] NVD JSON parse failed (attempt {attempt + 1}/4)")
+        except Exception as e:
+            print(f"[!] NVD curl error: {e} (attempt {attempt + 1}/4)")
+
+        time.sleep(2 if _NVD_KEY else 7)   # back off before retrying
+        _NVD_LAST[0] = time.time()
+
+    print("[!] NVD fetch failed after 4 attempts.")
+    return None
 
 
 def lookup_nvd(cve_id):
@@ -843,24 +470,194 @@ def search_nvd_by_keyword(finding):
     return None
 
 
-def get_fallback_data(finding):
-    title       = finding.get('title', '').lower()
-    description = finding.get('description', '').lower()
-    asset       = finding.get('asset', '').lower()
-    combined    = f"{title} {description} {asset}"
+# get_fallback_data() and PROTOCOL_WEAKNESS_DB were removed: CVSS for
+# CWE-classified findings with no CVE is now computed from the CWE via
+# backend.cvss_predictor (ML model if trained, else the baseline vector),
+# rather than looked up in a hand-typed table.
 
-    for keyword, data in PROTOCOL_WEAKNESS_DB.items():
-        if keyword in combined:
-            exploit_level  = data.get('exploit_level', 'Unknown')
-            exploit_reason = data.get('exploit_reason', '')
-            cve            = data.get('cve_id', 'N/A')
-            print(
-                f"[*] Protocol fallback '{keyword}': "
-                f"CVE={cve} Level={exploit_level}"
+
+def get_no_cve_reason(finding):
+    """
+    Generate a specific, human-readable explanation for why a finding
+    has no CVE, based on its type, tool, category, and title.
+    Displayed in the UI so analysts understand it is intentional,
+    not a pipeline failure.
+    """
+    title    = (finding.get('title',    '') or '').lower()
+    desc     = (finding.get('description', '') or '').lower()
+    category = (finding.get('category', '') or '').lower()
+    tool     = (finding.get('tool',     '') or '').lower()
+    combined = f"{title} {desc} {category}"
+
+    # ── Discovery / recon findings ────────────────────────────
+    if tool in ('gobuster', 'ffuf') or \
+       'directory found' in combined or \
+       'endpoint discovered' in combined:
+        if 'htpasswd' in combined or 'htaccess' in combined:
+            return (
+                "The presence of a sensitive file (e.g. .htpasswd) "
+                "is a configuration exposure. CVEs are assigned to "
+                "exploitable software bugs, not to files existing at "
+                "predictable paths."
             )
-            return data, exploit_level, exploit_reason
+        return (
+            "This is a directory or endpoint discovery result. "
+            "CVEs are assigned to software vulnerabilities, not to "
+            "paths or directories being present on a server."
+        )
 
-    return None, None, None
+    # ── Live host / HTTP probe ────────────────────────────────
+    if tool in ('httpx', 'httprobe') or 'live host' in combined:
+        return (
+            "This is a host-reachability finding — informational "
+            "only. No vulnerability is present, so no CVE applies."
+        )
+
+    # ── Technology detection (whatweb) ────────────────────────
+    if tool == 'whatweb' or 'technology detected' in combined:
+        if 'outdated' in combined or 'appears to be' in combined:
+            return (
+                "An outdated software version was detected but no "
+                "matching CVE was found in NVD, CIRCL, or MITRE. "
+                "The risk is represented by the CWE and computed "
+                "CVSS score above."
+            )
+        return (
+            "Technology fingerprinting identifies what software is "
+            "running — informational only. No specific vulnerability "
+            "was detected, so no CVE is assigned."
+        )
+
+    # ── Missing / deprecated HTTP security headers ────────────
+    if 'header' in combined and any(
+        kw in combined for kw in
+        ('missing', 'not set', 'deprecated', 'suggested security')
+    ):
+        return (
+            "Missing or deprecated HTTP security headers are a "
+            "server misconfiguration. CVEs are assigned to "
+            "exploitable software defects, not to absent header "
+            "settings."
+        )
+
+    # ── Open port — protocol weakness ─────────────────────────
+    if 'open port' in combined or category == 'open_port':
+        proto_map = {
+            'telnet':     'Telnet transmits data in cleartext by design — '
+                          'this is a protocol choice, not a software bug.',
+            'ftp':        'FTP transmits credentials in cleartext by design — '
+                          'this is a protocol choice, not a software bug.',
+            'ssh':        'SSH being open is not itself a vulnerability. '
+                          'CVEs apply to specific SSH implementation bugs, '
+                          'not to the port being open.',
+            'smtp':       'SMTP being exposed is a configuration choice. '
+                          'No CVE is assigned for the service being open.',
+            'nfs':        'An NFS share being accessible is a configuration '
+                          'exposure, not a software bug with a CVE.',
+            'vnc':        'VNC being open is a configuration exposure. '
+                          'CVEs exist for specific VNC implementation bugs, '
+                          'not for the service being enabled.',
+            'rdp':        'RDP being open is a configuration exposure. '
+                          'CVEs apply to specific RDP implementation bugs.',
+            'java-rmi':   'Java RMI being open is a configuration exposure. '
+                          'CVEs apply to specific RMI exploit payloads, '
+                          'not to the port being open.',
+            'irc':        'IRC being open is a configuration choice. '
+                          'CVEs apply to specific IRC daemon exploits.',
+            'mysql':      'MySQL being network-accessible is a configuration '
+                          'exposure. CVEs apply to specific database bugs.',
+            'rpcbind':    'RPC/portmapper being open is a configuration '
+                          'exposure, not a specific software vulnerability.',
+            'netbios':    'NetBIOS/SMB exposure is a configuration choice. '
+                          'CVEs apply to specific SMB implementation bugs.',
+            'exec':       'Remote exec service (rsh) being open is a '
+                          'serious configuration exposure with no single CVE.',
+            'tcpwrapped': 'Port is TCP-wrapped — service details are '
+                          'unavailable for CVE matching.',
+        }
+        for proto, reason in proto_map.items():
+            if proto in combined:
+                return reason
+        return (
+            "An open port indicates a service is running. CVEs are "
+            "assigned to specific exploitable bugs in software, not "
+            "to ports being open."
+        )
+
+    # ── Default / weak credentials ────────────────────────────
+    if any(kw in combined for kw in
+           ('default login', 'default credential', 'weak credential',
+            'ftp weak', 'vnc default')):
+        return (
+            "Default or weak credentials are a configuration "
+            "weakness (CWE-1392 / CWE-521). A CVE is only assigned "
+            "when a specific software version ships with documented "
+            "hardcoded credentials."
+        )
+
+    # ── Empty password ────────────────────────────────────────
+    if 'empty password' in combined or 'pgsql empty' in combined:
+        return (
+            "An empty password is a configuration weakness "
+            "(CWE-521). No CVE is assigned for a service being "
+            "configured without a password — that is an "
+            "administrative decision, not a software bug."
+        )
+
+    # ── PHP information disclosure ────────────────────────────
+    if any(kw in combined for kw in
+           ('phpinfo', 'php easter', 'easter egg')):
+        return (
+            "PHP's phpinfo() and Easter Egg features are built-in "
+            "functionality that expose version and configuration "
+            "details. No CVE is assigned for these features being "
+            "enabled — it is a deployment configuration choice."
+        )
+
+    # ── Directory listing ─────────────────────────────────────
+    if 'directory listing' in combined or \
+       'directory indexing' in combined or \
+       'icons/' in combined:
+        return (
+            "Directory listing / indexing is a web server "
+            "configuration setting. No CVE is assigned for "
+            "misconfigured directory browsing."
+        )
+
+    # ── HTTP TRACE ────────────────────────────────────────────
+    if 'http trace' in combined or 'trace method' in combined:
+        return (
+            "HTTP TRACE is a protocol method that server "
+            "administrators can enable or disable. No CVE is "
+            "assigned for the method being active — it is a "
+            "configuration choice."
+        )
+
+    # ── Clickjacking / X-Frame ────────────────────────────────
+    if 'clickjacking' in combined or 'x-frame' in combined:
+        return (
+            "Missing X-Frame-Options is a security header "
+            "configuration issue, not a software bug. No CVE is "
+            "assigned for absent HTTP security headers."
+        )
+
+    # ── Outdated software (generic) ───────────────────────────
+    if 'outdated' in combined or 'appears to be' in combined:
+        return (
+            "An outdated software version was detected. A CVE "
+            "lookup was attempted across NVD, CIRCL, and MITRE "
+            "but no matching entry was returned. The risk is "
+            "represented by the CWE and computed CVSS score."
+        )
+
+    # ── Fallback ──────────────────────────────────────────────
+    return (
+        "No specific software vulnerability with an assigned CVE "
+        "number was identified. This finding represents a "
+        "configuration, protocol, or exposure weakness — the risk "
+        "is captured by the CWE classification and computed CVSS "
+        "score above."
+    )
 
 
 def enrich_finding(finding):
@@ -879,22 +676,31 @@ def enrich_finding(finding):
     cves = extract_cve_from_text(combined)
     print(f"[*] CVEs from Nuclei: {cves if cves else 'none'}")
 
-    # ── Step 2: Verify with NVD API ──────────────────────────
+    # ── Step 2: Multi-source CVE lookup ──────────────────────
+    # Queries NVD + CIRCL + MITRE, cross-checks scores, and
+    # falls back to Claude API if all sources return nothing.
     nvd_results = {}
     best_cve    = None
     best_score  = -1
 
     for cve in cves:
-        nvd_data = lookup_nvd(cve)
-        if nvd_data and nvd_data.get('cvss_score'):
-            nvd_results[cve] = nvd_data
-            score = nvd_data.get('cvss_score') or 0
+        try:
+            from backend.cve_multi_source import lookup_cve_multi
+            cve_data = lookup_cve_multi(cve, finding)
+        except Exception:
+            # Graceful fallback to single-source NVD if module missing
+            cve_data = lookup_nvd(cve)
+
+        if cve_data and cve_data.get('cvss_score'):
+            nvd_results[cve] = cve_data
+            score = cve_data.get('cvss_score') or 0
             if score > best_score:
                 best_score = score
                 best_cve   = cve
+                conf = cve_data.get('data_confidence', '')
                 print(
-                    f"[+] NVD direct: {cve} "
-                    f"CVSS: {score}"
+                    f"[+] Multi-source: {cve} CVSS: {score} "
+                    f"| Confidence: {conf}"
                 )
 
     nvd_best = nvd_results.get(best_cve) if best_cve else None
@@ -918,7 +724,7 @@ def enrich_finding(finding):
         except Exception as e:
             print(f"[!] Weakness enrichment error: {e}")
 
-    # ── Step 4: NVD keyword (known signatures only) ───────────
+    # ── Step 4: NVD keyword search ────────────────────────────
     if not nvd_best:
         if has_known_cve_signature(finding):
             print(
@@ -934,32 +740,103 @@ def enrich_finding(finding):
                 "skipping NVD keyword search."
             )
         else:
-            print(
-                "[*] Generic recon finding — "
-                "skipping broad NVD search."
-            )
+            # Last chance: if extract_search_keywords pulled a
+            # version string (e.g. "apache httpd 2.2.8"), search
+            # NVD for it — covers Nikto/whatweb version disclosures.
+            title       = finding.get('title', '')
+            description = finding.get('description', '')
+            asset       = finding.get('asset', '')
+            kws = extract_search_keywords(title, description, asset)
+            if kws:
+                print(
+                    f"[*] Version-based NVD search: "
+                    f"'{kws[0]}'..."
+                )
+                nvd_best = search_nvd_by_keyword(finding)
+                if nvd_best:
+                    best_cve = nvd_best.get('cve_id')
+            else:
+                print(
+                    "[*] Generic recon finding — "
+                    "skipping broad NVD search."
+                )
 
-    # ── Step 5: Protocol/CWE fallback ────────────────────────
+    # ── Step 4.5: Claude CVE suggestion → multi-source verify ──
+    # If all keyword/version searches still found nothing AND this is
+    # not a pure configuration weakness (telnet, FTP, missing headers),
+    # ask Claude to suggest the most relevant CVE, then immediately
+    # verify that suggestion against NVD + CIRCL + MITRE.
+    if not nvd_best and not is_configuration_weakness(finding):
+        try:
+            from backend.cve_multi_source import (
+                claude_suggest_cve,
+                lookup_cve_multi,
+            )
+            suggested = claude_suggest_cve(finding)
+            if suggested:
+                print(
+                    f"[*] Verifying Claude suggestion "
+                    f"{suggested} against sources..."
+                )
+                verified = lookup_cve_multi(suggested, finding)
+                if verified and verified.get('cvss_score'):
+                    verified['is_ai_suggested'] = True
+                    verified['ai_suggested_cve'] = suggested
+                    nvd_best = verified
+                    best_cve = suggested
+                    print(
+                        f"[+] AI-suggested CVE verified: "
+                        f"{suggested} CVSS "
+                        f"{verified.get('cvss_score')} "
+                        f"{verified.get('cvss_severity')} "
+                        f"| Confidence: "
+                        f"{verified.get('data_confidence')}"
+                    )
+                else:
+                    print(
+                        f"[!] Claude suggested {suggested} "
+                        f"but sources could not verify it — discarding."
+                    )
+        except Exception as e:
+            print(f"[!] Step 4.5 error: {e}")
+
+    # ── Step 5: CWE → CVSS prediction (replaces manual table) ─
     exploit_level  = None
     exploit_reason = None
 
-    if not nvd_best:
-        print("[*] Using protocol/CWE fallback...")
-        nvd_best, exploit_level, exploit_reason = \
-            get_fallback_data(finding)
-
-    # ── Exploitability from NVD ───────────────────────────────
-    if nvd_best and not exploit_level:
-        exploit_level, exploit_reason = \
-            get_exploitability_from_nvd(nvd_best)
-
-    # ── CWE data ──────────────────────────────────────────────
+    # Resolve the CWE first so we can both derive a score from it and
+    # gate the GPT phase correctly.
     cwe_data = None
     try:
         from backend.weakness_enrichment import get_cwe_for_finding
         cwe_data = get_cwe_for_finding(finding)
     except Exception:
         pass
+
+    # Compute a CVSS from the CWE (ML model if trained, else the
+    # baseline vector) via the official CVSS 3.1 formula — instead of
+    # looking the score up in a hand-typed table.
+    if not nvd_best and cwe_data and cwe_data.get('cwe_id'):
+        try:
+            from backend.cvss_predictor import derive_cvss_from_cwe
+            nvd_best = derive_cvss_from_cwe(
+                cwe_data['cwe_id'], finding
+            )
+            if nvd_best:
+                exploit_level  = nvd_best.get('exploit_level')
+                exploit_reason = nvd_best.get('exploit_reason')
+                print(
+                    f"[+] CVSS derived from {cwe_data['cwe_id']}: "
+                    f"{nvd_best.get('cvss_score')} "
+                    f"({nvd_best.get('cvss_severity')})"
+                )
+        except Exception as e:
+            print(f"[!] CVSS derivation error: {e}")
+
+    # ── Exploitability from NVD (real-CVE findings) ──────────
+    if nvd_best and not exploit_level:
+        exploit_level, exploit_reason = \
+            get_exploitability_from_nvd(nvd_best)
 
     # ── Phase 2: GPT Reasoning Layer ─────────────────────────
     # Called ONLY when deterministic enrichment is incomplete
@@ -1021,6 +898,27 @@ def enrich_finding(finding):
     if gpt_result and gpt_result.get('ai_explanation'):
         ai_explanation = gpt_result.get('ai_explanation')
 
+    # ── Step 6: Derive CVSS from CWE when no CVE was found ───
+    # Most recon findings have no CVE but do get a CWE. Rather than a
+    # hand-typed score, compute one from the CWE (ML model if trained,
+    # else the baseline table) via the official CVSS 3.1 formula.
+    if not nvd_best and cwe_data and cwe_data.get('cwe_id'):
+        try:
+            from backend.cvss_predictor import derive_cvss_from_cwe
+            nvd_best = derive_cvss_from_cwe(
+                cwe_data['cwe_id'], finding
+            )
+            if nvd_best:
+                exploit_level  = exploit_level or nvd_best.get('exploit_level')
+                exploit_reason = exploit_reason or nvd_best.get('exploit_reason')
+                print(
+                    f"[+] CVSS derived from {cwe_data['cwe_id']}: "
+                    f"{nvd_best.get('cvss_score')} "
+                    f"({nvd_best.get('cvss_severity')})"
+                )
+        except Exception as e:
+            print(f"[!] CVSS derivation error: {e}")
+
     return {
         'cves':           cves,
         'nvd_data':       nvd_results,
@@ -1035,6 +933,15 @@ def enrich_finding(finding):
         'cwe_data':       cwe_data,
         'ai_explanation': ai_explanation,
         'gpt_result':     gpt_result,
+        'no_cve_reason':  (
+            None if best_cve else (
+                # Prefer Claude's contextual explanation (from phase 2)
+                # Fall back to the static function for findings where
+                # phase 2 didn't fire (e.g. telnet — already has CWE+level)
+                (gpt_result.get('no_cve_reason') if gpt_result else None)
+                or get_no_cve_reason(finding)
+            )
+        ),
     }
 
 

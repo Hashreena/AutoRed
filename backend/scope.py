@@ -1,497 +1,156 @@
-import re
-import os
-import json
+"""
+AutoRed — Scope / Authorization backend
+========================================
+
+Two DB tables:
+  scope_blocklist     — IPs/domains blocked by default
+  authorized_targets  — allowlist that overrides the blocklist
+
+Full flow:
+  1. Add target to blocklist (blocked by default)
+  2. Company requests scan → authorization request sent
+  3. CISO approves via 6-digit code → target added to allowlist
+  4. Scan runs (target passes validate_target check)
+  5. When engagement done → press Remove in UI → back to blocklist
+"""
+
 import ipaddress
-from datetime import datetime
+import os
+import random
+import smtplib
+from datetime             import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text      import MIMEText
+
+from backend.db import get_connection
 
 
-# ============================================================
-# AutoRed Scope Validation Policy
-# Based on official Malaysian and international sources:
-#
-# 1. NACSA Malaysia — Critical National Information
-#    Infrastructure (CNII) Sector Classification
-#    https://www.nacsa.gov.my/cni.php
-#
-# 2. Bank Negara Malaysia (BNM) — Licensed Financial
-#    Institutions List
-#    https://www.bnm.gov.my
-#
-# 3. MAMPU — Malaysian Government Portal Directory
-#    https://www.malaysia.gov.my
-#
-# 4. MYNIC — Malaysian Domain Registry
-#    https://www.mynic.my
-#
-# 5. IANA Root Zone Database — TLD Registry
-#    https://www.iana.org/domains/root/db
-#
-# 6. NIST SP 800-82 — ICS Security Guidelines
-#    https://csrc.nist.gov/publications/detail/sp/800-82
-# ============================================================
+# ── DB migration ──────────────────────────────────────────────
+def _migrate():
+    conn   = get_connection()
+    cursor = conn.cursor()
+
+    # Blocklist table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS scope_blocklist (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            target   TEXT UNIQUE NOT NULL,
+            reason   TEXT,
+            added_on TEXT
+        )
+    ''')
+
+    # Allowlist / authorized targets table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS authorized_targets (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            target           TEXT UNIQUE NOT NULL,
+            authorized_by    TEXT,
+            engagement       TEXT,
+            notes            TEXT,
+            authorizer_email TEXT,
+            authorized_on    TEXT,
+            status           TEXT DEFAULT 'approved',
+            approval_token   TEXT
+        )
+    ''')
+
+    # Safely add new columns to existing installs
+    cols = [
+        r[1] for r in cursor.execute(
+            "PRAGMA table_info(authorized_targets)"
+        ).fetchall()
+    ]
+    for col, defn in [
+        ('authorizer_email', 'TEXT'),
+        ('status',           "TEXT DEFAULT 'approved'"),
+        ('approval_token',   'TEXT'),
+    ]:
+        if col not in cols:
+            try:
+                cursor.execute(
+                    f"ALTER TABLE authorized_targets "
+                    f"ADD COLUMN {col} {defn}"
+                )
+            except Exception:
+                pass
+
+    conn.commit()
+    conn.close()
 
 
-# ── Authorized Targets Whitelist ──────────────────────────────
-# Targets explicitly authorized by the operator
-# Stored in storage/authorized_targets.json
-AUTHORIZED_TARGETS_FILE = os.path.join(
-    os.path.dirname(__file__), '..', 'storage',
-    'authorized_targets.json'
-)
+_migrate()
 
 
-def load_authorized_targets():
-    if not os.path.exists(AUTHORIZED_TARGETS_FILE):
-        return []
-    try:
-        with open(AUTHORIZED_TARGETS_FILE, 'r') as f:
-            data = json.load(f)
-            return [
-                t.lower().strip()
-                for t in data.get('targets', [])
-            ]
-    except Exception:
-        return []
+# ── Scope validation ──────────────────────────────────────────
+def _matches_entry(target, entry):
+    """
+    Match a target against a blocklist entry.
+    Supports exact match, wildcard (*.domain.com), CIDR.
+    """
+    t = target.lower().strip()
+    e = entry.lower().strip()
 
-
-def save_authorized_target(
-    target, authorized_by, engagement, notes=''
-):
-    os.makedirs(
-        os.path.dirname(AUTHORIZED_TARGETS_FILE),
-        exist_ok=True
-    )
-
-    data = {}
-    if os.path.exists(AUTHORIZED_TARGETS_FILE):
-        try:
-            with open(AUTHORIZED_TARGETS_FILE, 'r') as f:
-                data = json.load(f)
-        except Exception:
-            data = {}
-
-    if 'targets' not in data:
-        data['targets']        = []
-    if 'authorizations' not in data:
-        data['authorizations'] = []
-
-    target = target.lower().strip()
-    if target not in data['targets']:
-        data['targets'].append(target)
-
-    data['authorizations'].append({
-        'target':        target,
-        'authorized_by': authorized_by,
-        'engagement':    engagement,
-        'notes':         notes,
-        'authorized_on': datetime.now().strftime(
-            '%Y-%m-%d %H:%M:%S'
-        ),
-    })
-
-    with open(AUTHORIZED_TARGETS_FILE, 'w') as f:
-        json.dump(data, f, indent=2)
-
-    print(
-        f"[+] Target '{target}' authorized "
-        f"by {authorized_by} for {engagement}"
-    )
-    return True
-
-
-def is_authorized_target(target):
-    authorized = load_authorized_targets()
-    target     = target.lower().strip()
-    for auth in authorized:
-        if target == auth or target.endswith('.' + auth):
-            return True
-    return False
-
-
-def remove_authorized_target(target):
-    if not os.path.exists(AUTHORIZED_TARGETS_FILE):
-        return False
-    try:
-        with open(AUTHORIZED_TARGETS_FILE, 'r') as f:
-            data = json.load(f)
-        target = target.lower().strip()
-        if target in data.get('targets', []):
-            data['targets'].remove(target)
-            with open(AUTHORIZED_TARGETS_FILE, 'w') as f:
-                json.dump(data, f, indent=2)
-            print(
-                f"[+] '{target}' removed from whitelist"
-            )
-            return True
-    except Exception as e:
-        print(f"[!] Error removing target: {e}")
-    return False
-
-
-def get_all_authorizations():
-    if not os.path.exists(AUTHORIZED_TARGETS_FILE):
-        return []
-    try:
-        with open(AUTHORIZED_TARGETS_FILE, 'r') as f:
-            data = json.load(f)
-            return data.get('authorizations', [])
-    except Exception:
-        return []
-
-
-# ── Exact Blocklist ──────────────────────────────────────────
-BLOCKLIST = [
-    'localhost',
-    '127.0.0.1',
-    '0.0.0.0',
-    '::1',
-]
-
-
-# ── Blocked Domains ──────────────────────────────────────────
-BLOCKED_DOMAINS = [
-
-    # ── Major Public Services ─────────────────────────────
-    'google.com',       'gmail.com',
-    'youtube.com',      'googleapis.com',
-    'facebook.com',     'instagram.com',
-    'whatsapp.com',     'meta.com',
-    'microsoft.com',    'azure.com',
-    'office.com',       'outlook.com',
-    'live.com',         'hotmail.com',
-    'bing.com',
-    'amazon.com',       'amazonaws.com',
-    'apple.com',        'icloud.com',
-    'twitter.com',      'x.com',
-    'linkedin.com',     'tiktok.com',
-    'snapchat.com',     'reddit.com',
-    'netflix.com',      'spotify.com',
-    'wikipedia.org',    'wikimedia.org',
-    'openai.com',       'anthropic.com',
-    'cloudflare.com',   'github.com',
-    'gitlab.com',
-
-    # ── Malaysian Banking & Finance ───────────────────────
-    # Source: BNM Licensed Financial Institutions
-    # https://www.bnm.gov.my/licensed-institutions
-    'maybank.com',          'maybank2u.com',
-    'cimb.com',             'cimbclicks.com',
-    'publicbank.com.my',    'pbebank.com',
-    'rhbbank.com',          'rhbgroup.com',
-    'hongleongbank.com',    'hlb.com.my',
-    'affinbank.com',        'affinislamic.com',
-    'alliancebank.com.my',  'allianceonline.com.my',
-    'ambankgroup.com',      'ambank.com.my',
-    'bankislam.com',        'bankislam.com.my',
-    'bsn.com.my',
-    'muamalat.com.my',
-    'hsbc.com.my',
-    'ocbc.com.my',
-    'standardchartered.com.my',
-    'uob.com.my',
-    'citibank.com.my',
-    'bankrakyat.com.my',
-    'agro.bank',
-    'smebank.com.my',
-    'exim.com.my',
-    'sc.com.my',
-    'bursamalaysia.com',
-
-    # International banks
-    'bankofamerica.com',    'chase.com',
-    'wellsfargo.com',       'barclays.com',
-    'lloydsbankinggroup.com',
-    'paypal.com',           'stripe.com',
-    'visa.com',             'mastercard.com',
-
-    # ── Malaysian Government Portals ──────────────────────
-    # Source: MAMPU Government Portal Directory
-    # https://www.malaysia.gov.my
-    'malaysia.gov.my',      'mygov.my',
-    'myeg.com.my',          'eperolehan.gov.my',
-    'spr.gov.my',           'lhdn.gov.my',
-    'hasil.gov.my',         'bnm.gov.my',
-    'pdrm.gov.my',          'kpn.gov.my',
-    'jpn.gov.my',           'jpa.gov.my',
-    'mkn.gov.my',           'kdn.gov.my',
-    'mot.gov.my',           'moh.gov.my',
-    'moe.gov.my',           'mohe.gov.my',
-    'kkmm.gov.my',          'mosti.gov.my',
-    'miti.gov.my',          'treasury.gov.my',
-    'agc.gov.my',           'pmo.gov.my',
-    'parlimen.gov.my',      'sprm.gov.my',
-    'mampu.gov.my',         'nacsa.gov.my',
-    'cybersecurity.my',
-
-    # ── Malaysian Critical Infrastructure ─────────────────
-    # Source: NACSA CNII Sector Classification
-    # https://www.nacsa.gov.my/cni.php
-
-    # Energy
-    'tnb.com.my',           'petronas.com.my',
-    'petronasgas.com',      'sapuraenergy.com',
-    'dialog.com.my',
-
-    # Telecommunications
-    'telekom.com.my',       'tm.com.my',
-    'maxis.com.my',         'celcom.com.my',
-    'digi.com.my',          'u.com.my',
-    'yes.my',               'unifi.com.my',
-
-    # Water
-    'airselangor.com.my',   'syabas.com.my',
-    'pbapp.com.my',         'sajh.com.my',
-
-    # Transportation
-    'airasia.com',          'malaysiaairlines.com',
-    'mas.com.my',           'ktmb.com.my',
-    'prasarana.com.my',     'myrapid.com.my',
-
-    # Health
-    'kpj.com.my',           'ihh.com.my',
-    'pantai.com.my',        'sunwaymedical.com',
-    'columbia-asia.com',
-
-    # Emergency & Defence
-    'bomba.gov.my',         'rela.gov.my',
-    'mod.gov.my',           'mindef.gov.my',
-    'atm.mil.my',
-]
-
-
-# ── Blocked TLDs ─────────────────────────────────────────────
-# Source: MYNIC + IANA Root Zone Database
-BLOCKED_TLDS = [
-    # Malaysian Government & Military
-    '.gov.my',      '.mil.my',
-    '.edu.my',      '.police.gov.my',
-    '.army.mil.my', '.navy.mil.my',
-    '.airforce.mil.my',
-
-    # International Government
-    '.gov',         '.mil',
-    '.govt.nz',     '.gov.uk',
-    '.gov.au',      '.gov.sg',
-    '.gov.in',      '.gov.ph',
-    '.gov.id',      '.gov.th',
-    '.gov.bn',      '.gov.us',
-    '.gc.ca',       '.gov.vn',
-    '.gov.kh',      '.gov.la',
-    '.gov.mm',
-
-    # Military subdomains
-    '.army.mil',    '.navy.mil',
-    '.af.mil',      '.mod.uk',
-    '.defence.gov.au',
-
-    # Education
-    '.edu',         '.ac.my',
-    '.ac.uk',       '.edu.sg',
-    '.edu.au',      '.edu.ph',
-    '.ac.id',
-]
-
-
-# ── Blocked Keywords ─────────────────────────────────────────
-# Source: NACSA Malaysia CNII Sector Definition
-BLOCKED_KEYWORDS = [
-
-    # Defence & Security (CNII Sector 4)
-    'police', 'pdrm', 'army', 'navy', 'airforce',
-    'military', 'defense', 'defence', 'mindef',
-    'armed.forces', 'interpol', 'fbi', 'cia', 'nsa',
-    'dea', 'atf', 'homeland', 'pentagon', 'nato',
-    'bomba', 'coastguard',
-
-    # Government (CNII Sector 1)
-    'parliament', 'parlimen', 'congress', 'senate',
-    'whitehouse', 'kremlin', 'judiciary', 'mahkamah',
-    'sprm', 'macc', 'suruhanjaya', 'jabatan',
-    'kementerian', 'perkeso', 'kwsp', 'epf',
-    'lhdn', 'hasil',
-
-    # Health (CNII Sector 7)
-    'hospital', 'klinik', 'clinic', 'healthcare',
-    'medical', 'pharmacy', 'farmasi', 'ambulance',
-
-    # Energy (CNII Sector 5)
-    'nuclear', 'powerplant', 'power.plant',
-    'electric.grid', 'tenaga', 'petroleum',
-    'pipeline', 'refinery',
-
-    # Water (CNII Sector 6)
-    'waterworks', 'water.treatment', 'rawatan.air',
-    'sewage', 'pembetungan', 'reservoir',
-
-    # Emergency Services (CNII Sector 10)
-    'rescue', 'penyelamat',
-
-    # Banking & Finance (CNII Sector 2)
-    'centralbank', 'bank.negara', 'bursa',
-    'federalreserve',
-
-    # Transport (CNII Sector 3)
-    'airport', 'lapangan.terbang', 'seaport',
-    'pelabuhan', 'railway', 'keretapi',
-
-    # Other critical
-    'prison', 'jail', 'correctional',
-]
-
-
-def is_private_ip(target):
-    try:
-        ip = ipaddress.ip_address(target.split('/')[0])
-        return ip.is_private
-    except ValueError:
-        return False
-
-
-def is_valid_ip(target):
-    try:
-        ipaddress.ip_address(target)
+    if t == e:
         return True
-    except ValueError:
-        return False
 
+    # Wildcard domain *.company.com
+    if e.startswith('*.'):
+        suffix = e[1:]
+        if t.endswith(suffix) or t == e[2:]:
+            return True
 
-def is_valid_cidr(target):
+    # CIDR range e.g. 10.0.0.0/8
     try:
-        ipaddress.ip_network(target, strict=False)
-        return True
+        ip  = ipaddress.ip_address(t)
+        net = ipaddress.ip_network(e, strict=False)
+        if ip in net:
+            return True
     except ValueError:
-        return False
+        pass
 
-
-def is_valid_domain(target):
-    pattern = re.compile(
-        r'^(?:[a-zA-Z0-9]'
-        r'(?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)'
-        r'+[a-zA-Z]{2,}$'
-    )
-    return bool(pattern.match(target))
+    return False
 
 
 def validate_target(target):
+    """
+    Returns {'allowed': bool, 'reason': str, 'authorized': bool}.
+
+    Logic:
+      1. Is the target in the blocklist?  → if no  → allow
+      2. Is the target in the allowlist (approved)? → if yes → allow
+      3. Otherwise → block with reason
+    """
     if not target:
         return {
             'allowed':    False,
+            'reason':     'No target specified.',
             'authorized': False,
-            'reason':     'Target cannot be empty.',
         }
 
-    target = (
-        target.strip().lower()
-        .replace('https://', '')
-        .replace('http://', '')
-        .split('/')[0]
-        .split(':')[0]
-    )
+    # Check blocklist
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT target, reason FROM scope_blocklist")
+    blocked = None
+    for row in cursor.fetchall():
+        if _matches_entry(target, row[0]):
+            blocked = row
+            break
+    conn.close()
 
-    # ── Check authorized whitelist FIRST ─────────────────
-    # Companies with authorization can override blocklist
-    if is_authorized_target(target):
+    if blocked is None:
+        return {'allowed': True, 'reason': '', 'authorized': False}
+
+    # Blocked — check allowlist override
+    if is_authorized(target):
         return {
             'allowed':    True,
+            'reason':     '',
             'authorized': True,
-            'reason': (
-                f'"{target}" is explicitly authorized '
-                f'for this engagement. '
-                f'See Authorized Targets Manager.'
-            ),
-        }
-
-    # ── Check exact blocklist ────────────────────────────
-    if target in BLOCKLIST:
-        return {
-            'allowed':    False,
-            'authorized': False,
-            'reason': (
-                f'"{target}" is blocked. '
-                f'Scanning localhost or loopback '
-                f'is not permitted.'
-            ),
-        }
-
-    # ── Allow private IPs ────────────────────────────────
-    if is_valid_ip(target):
-        if is_private_ip(target):
-            return {
-                'allowed':    True,
-                'authorized': False,
-                'reason': (
-                    f'Private IP {target} allowed '
-                    f'for internal/lab pentesting.'
-                ),
-            }
-        else:
-            return {
-                'allowed':    True,
-                'authorized': False,
-                'reason': (
-                    f'Public IP {target} — ensure '
-                    f'you have written authorization.'
-                ),
-            }
-
-    if is_valid_cidr(target):
-        return {
-            'allowed':    True,
-            'authorized': False,
-            'reason':     f'Valid CIDR range: {target}',
-        }
-
-    # ── Check blocked TLDs ───────────────────────────────
-    for tld in BLOCKED_TLDS:
-        if target.endswith(tld):
-            return {
-                'allowed':    False,
-                'authorized': False,
-                'reason': (
-                    f'"{target}" is blocked. '
-                    f'"{tld}" domains are protected '
-                    f'under MYNIC/IANA policy. '
-                    f'Use the Authorized Targets Manager '
-                    f'to override with written authorization.'
-                ),
-            }
-
-    # ── Check blocked domains ────────────────────────────
-    for domain in BLOCKED_DOMAINS:
-        if target == domain or target.endswith('.' + domain):
-            return {
-                'allowed':    False,
-                'authorized': False,
-                'reason': (
-                    f'"{target}" is a protected domain '
-                    f'under NACSA CNII or BNM policy. '
-                    f'Use the Authorized Targets Manager '
-                    f'to override with written authorization.'
-                ),
-            }
-
-    # ── Check blocked keywords ───────────────────────────
-    for keyword in BLOCKED_KEYWORDS:
-        if keyword in target:
-            return {
-                'allowed':    False,
-                'authorized': False,
-                'reason': (
-                    f'"{target}" contains restricted '
-                    f'keyword "{keyword}" (NACSA CNII). '
-                    f'Use the Authorized Targets Manager '
-                    f'to override with written authorization.'
-                ),
-            }
-
-    # ── Validate domain format ───────────────────────────
-    if is_valid_domain(target):
-        return {
-            'allowed':    True,
-            'authorized': False,
-            'reason': (
-                f'Domain "{target}" is valid. '
-                f'Ensure you have written authorization.'
+            'note': (
+                'Target is in blocklist but has '
+                'approved authorization — allowed.'
             ),
         }
 
@@ -499,84 +158,302 @@ def validate_target(target):
         'allowed':    False,
         'authorized': False,
         'reason': (
-            f'"{target}" is not a valid IP, '
-            f'CIDR, or domain format.'
+            blocked[1] or
+            f"'{target}' is in the scope blocklist. "
+            f"Request written authorization via "
+            f"Authorized Targets Manager."
         ),
     }
 
 
-if __name__ == '__main__':
-    print("=" * 60)
-    print("AutoRed — Scope Validation Test")
-    print("=" * 60)
+# ── Blocklist management ──────────────────────────────────────
+def add_to_blocklist(target, reason=''):
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT OR REPLACE INTO scope_blocklist "
+        "(target, reason, added_on) VALUES (?, ?, ?)",
+        (target, reason,
+         datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    )
+    conn.commit()
+    conn.close()
 
-    # Test adding authorization
-    print("\n[*] Testing authorization whitelist...")
-    save_authorized_target(
-        'maybank.com',
-        'Ahmad Fauzi — CISO CyberShield Sdn Bhd',
-        'Q3 2025 External Pentest — Ref SOW-2025-001',
-        'Authorized for web application testing only'
+
+def remove_from_blocklist(target):
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM scope_blocklist WHERE target=?",
+        (target,)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_blocklist():
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT target, reason, added_on "
+        "FROM scope_blocklist ORDER BY added_on DESC"
+    )
+    cols = [d[0] for d in cursor.description]
+    rows = [dict(zip(cols, r)) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+# ── Authorized targets (allowlist) ────────────────────────────
+def generate_token():
+    """6-digit approval code."""
+    return str(random.randint(100000, 999999))
+
+
+def save_authorized_target(
+    target, authorized_by, engagement, notes,
+    authorizer_email='', token=None, status='approved'
+):
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR REPLACE INTO authorized_targets
+        (target, authorized_by, engagement, notes,
+         authorizer_email, authorized_on,
+         status, approval_token)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        target, authorized_by, engagement, notes,
+        authorizer_email,
+        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        status, token
+    ))
+    conn.commit()
+    conn.close()
+
+
+def get_all_authorizations():
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT target, authorized_by, engagement, notes, "
+        "authorizer_email, authorized_on, status, "
+        "approval_token FROM authorized_targets "
+        "ORDER BY authorized_on DESC"
+    )
+    cols = [d[0] for d in cursor.description]
+    rows = [dict(zip(cols, r)) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def remove_authorized_target(target):
+    """
+    Remove from allowlist (called by Remove button in UI).
+    Target returns to being blocked by the blocklist.
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM authorized_targets WHERE target=?",
+        (target,)
+    )
+    conn.commit()
+    conn.close()
+
+
+def confirm_authorization(target, token):
+    """
+    Verify approval code → mark target as approved.
+    Returns (True, message) or (False, error).
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT approval_token, status "
+        "FROM authorized_targets WHERE target=?",
+        (target,)
+    )
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return False, "Target not found."
+    stored_token, status = row
+    if status == 'approved':
+        conn.close()
+        return True, "Already approved."
+    if str(stored_token).strip() != str(token).strip():
+        conn.close()
+        return False, "Invalid approval code. Please try again."
+    cursor.execute(
+        "UPDATE authorized_targets "
+        "SET status='approved', approval_token=NULL "
+        "WHERE target=?",
+        (target,)
+    )
+    conn.commit()
+    conn.close()
+    return True, "Authorization confirmed successfully."
+
+
+def is_authorized(target):
+    """True if target is in allowlist with status=approved."""
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id FROM authorized_targets "
+        "WHERE target=? AND status='approved'",
+        (target,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row is not None
+
+
+# ── Approval email ────────────────────────────────────────────
+def _load_env():
+    cfg      = {}
+    env_path = os.path.join(
+        os.path.dirname(__file__), '..', '.env'
+    )
+    if os.path.exists(env_path):
+        try:
+            with open(env_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and '=' in line and \
+                       not line.startswith('#'):
+                        k, v = line.split('=', 1)
+                        cfg[k.strip()] = v.strip()
+        except Exception:
+            pass
+    return cfg
+
+
+def send_approval_email(
+    target, authorized_by, engagement,
+    authorizer_email, token
+):
+    """Send 6-digit approval code to the authorizer."""
+    cfg  = _load_env()
+    host = cfg.get('SMTP_HOST', '')
+    port = int(cfg.get('SMTP_PORT', 587))
+    user = cfg.get('SMTP_EMAIL', '')
+    pw   = cfg.get('SMTP_PASSWORD', '')
+
+    if not all([host, user, pw, authorizer_email]):
+        print("[!] Approval email: missing SMTP config in .env")
+        return False
+
+    subject = (
+        f"[Action Required] AutoRed — "
+        f"Scan Authorization Request for {target}"
     )
 
-    tests = [
-        # Should be ALLOWED
-        ('192.168.112.130',     'Private IP — pentest lab'),
-        ('192.168.1.1',         'Private IP — corporate'),
-        ('10.0.0.1',            'Private IP — internal'),
-        ('10.0.0.0/24',         'Private CIDR range'),
-        ('45.33.32.156',        'Public IP — nmap scanme'),
-        ('scanme.nmap.org',     'Nmap official test site'),
-        ('testphp.vulnweb.com', 'Acunetix test site'),
-        ('example.com',         'Generic test domain'),
-        # Authorized override
-        ('maybank.com',         'Malaysian bank — AUTHORIZED'),
-        ('online.maybank.com',  'Maybank subdomain — AUTHORIZED'),
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#060b14;
+font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
+Arial,sans-serif;color:#e6edf3;">
+<div style="max-width:560px;margin:0 auto;padding:32px 16px;">
 
-        # Should be BLOCKED
-        ('localhost',           'Loopback'),
-        ('127.0.0.1',           'Loopback IP'),
-        ('0.0.0.0',             'Null IP'),
-        ('google.com',          'Major public service'),
-        ('cimb.com',            'Malaysian bank — BNM'),
-        ('pdrm.gov.my',         'Malaysian police — CNII'),
-        ('parliament.gov.my',   'Government — CNII'),
-        ('tnb.com.my',          'Energy — CNII'),
-        ('hospital.com.my',     'Health keyword — CNII'),
-        ('nuclear.com',         'Energy keyword — CNII'),
-        ('mod.gov.my',          'Defence — CNII'),
-        ('airasia.com',         'Transport — CNII'),
-        ('army.mil.my',         'Military TLD'),
-        ('utm.edu.my',          'Education TLD'),
-        ('cia.gov',             'US Government TLD'),
-        ('',                    'Empty target'),
-    ]
+  <div style="background:#0f172a;border:1px solid #1e293b;
+  border-top:3px solid #e94560;border-radius:12px;
+  padding:22px 26px;margin-bottom:20px;">
+    <div style="font-size:20px;font-weight:800;color:#e94560;">
+      AutoRed
+      <span style="color:#475569;font-weight:400;
+      font-size:15px;margin-left:8px;">
+      — Authorization Request</span>
+    </div>
+    <div style="font-size:12px;color:#475569;margin-top:4px;">
+      {datetime.now().strftime('%Y-%m-%d %H:%M')}
+    </div>
+  </div>
 
-    allowed_count = 0
-    blocked_count = 0
+  <div style="background:#0f172a;border:1px solid #1e293b;
+  border-radius:10px;padding:22px 24px;margin-bottom:20px;">
+    <p style="margin:0 0 12px;font-size:14px;
+    color:#e2e8f0;">Hello,</p>
+    <p style="margin:0 0 16px;font-size:14px;
+    color:#94a3b8;line-height:1.6;">
+      A penetration testing scan authorization request
+      requires your approval:
+    </p>
+    <table style="width:100%;border-collapse:collapse;
+    margin-bottom:20px;">
+      <tr>
+        <td style="padding:8px 0;font-size:12px;
+        color:#64748b;width:140px;">Target</td>
+        <td style="padding:8px 0;font-size:13px;
+        color:#e2e8f0;font-family:monospace;
+        font-weight:600;">{target}</td>
+      </tr>
+      <tr style="border-top:1px solid #1e293b;">
+        <td style="padding:8px 0;font-size:12px;
+        color:#64748b;">Requested By</td>
+        <td style="padding:8px 0;font-size:13px;
+        color:#e2e8f0;">{authorized_by}</td>
+      </tr>
+      <tr style="border-top:1px solid #1e293b;">
+        <td style="padding:8px 0;font-size:12px;
+        color:#64748b;">Engagement</td>
+        <td style="padding:8px 0;font-size:13px;
+        color:#e2e8f0;">{engagement}</td>
+      </tr>
+    </table>
+    <div style="background:#0a1628;border:1px solid #1e3a5f;
+    border-radius:10px;padding:20px;text-align:center;
+    margin-bottom:16px;">
+      <div style="font-size:11px;font-weight:700;
+      color:#3b82f6;letter-spacing:2px;
+      text-transform:uppercase;margin-bottom:10px;">
+        Approval Code
+      </div>
+      <div style="font-size:40px;font-weight:800;
+      color:#e2e8f0;letter-spacing:12px;
+      font-family:monospace;">{token}</div>
+      <div style="font-size:11px;color:#475569;
+      margin-top:10px;">
+        Provide this code to the requesting analyst
+        to confirm authorization in AutoRed.
+      </div>
+    </div>
+    <p style="margin:0;font-size:12px;color:#475569;
+    line-height:1.6;">
+      If you did not expect this request or
+      <strong style="color:#e94560;">do not authorize
+      </strong> this scan, please ignore this email
+      and notify your security team immediately.
+    </p>
+  </div>
 
-    for target, description in tests:
-        result = validate_target(target)
-        ok     = result['allowed']
-        auth   = result.get('authorized', False)
+  <div style="text-align:center;font-size:11px;color:#334155;">
+    AutoRed &nbsp;·&nbsp; APU FYP 2026
+  </div>
+</div>
+</body></html>"""
 
-        if ok:
-            allowed_count += 1
-            tag = '✅ AUTHORIZED' if auth else '✅ ALLOWED'
-        else:
-            blocked_count += 1
-            tag = '❌ BLOCKED'
+    msg            = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    msg['From']    = f"AutoRed <{user}>"
+    msg['To']      = authorizer_email
+    msg.attach(MIMEText(html, 'html'))
 
-        print(f"\n[{tag}] {target or 'empty'}")
-        print(f"  Desc:   {description}")
-        print(f"  Reason: {result['reason']}")
-
-    # Clean up test authorization
-    remove_authorized_target('maybank.com')
-
-    print(f"\n{'=' * 60}")
-    print(
-        f"Results: {allowed_count} allowed, "
-        f"{blocked_count} blocked"
-    )
-    print("[+] Test complete!")
+    try:
+        with smtplib.SMTP(host, port, timeout=30) as srv:
+            srv.ehlo()
+            srv.starttls()
+            srv.login(user, pw)
+            srv.sendmail(
+                user, authorizer_email, msg.as_string()
+            )
+        print(
+            f"[+] Approval email → {authorizer_email} "
+            f"(code: {token})"
+        )
+        return True
+    except Exception as e:
+        print(f"[!] Approval email failed: {e}")
+        return False

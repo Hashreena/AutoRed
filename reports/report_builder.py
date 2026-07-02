@@ -1,17 +1,29 @@
 import os
 import io
+import re
 from datetime import datetime
 from backend.db import get_connection
+from reports.report_enrichment import (
+    get_findings_with_db_columns,
+    enrich_findings_for_report,
+)
 
 SEVERITY_COLORS_RGB = {
-    'Critical': (139, 0,   0),
-    'High':     (233, 69,  96),
-    'Medium':   (255, 140, 0),
-    'Low':      (180, 150, 0),
-    'Info':     (74,  158, 255),
+    # Cleaner report colours
+    # Critical = dark red, High = orange red, Medium = amber,
+    # Low = green, Info = blue
+    'Critical': (153, 27, 27),
+    'High':     (234, 88, 12),
+    'Medium':   (245, 158, 11),
+    'Low':      (34, 197, 94),
+    'Info':     (59, 130, 246),
 }
 
-SEVERITY_CVSS = {
+# Used only as a LAST-RESORT fallback when a finding has no real
+# CVSS score even after live enrichment (e.g. a configuration
+# exposure with no CVE at all). Whenever a real finding['cvss_score']
+# exists, that real number is shown instead of this generic range.
+SEVERITY_CVSS_FALLBACK = {
     'Critical': '9.0 - 10.0',
     'High':     '7.0 - 8.9',
     'Medium':   '4.0 - 6.9',
@@ -65,30 +77,6 @@ TOOLS_INFO = [
     ('Nuclei',       'Template-based CVE vulnerability detection'),
 ]
 
-ATTACK_PATHS = {
-    'telnet':        'Attacker -> Network -> Port 23 -> Plaintext Sniff -> Full Access',
-    'bindshell':     'Attacker -> Network -> Port 1524 -> Root Shell -> Full Compromise',
-    'ftp':           'Attacker -> Network -> Port 21 -> Brute Force -> File Access',
-    'mysql':         'Attacker -> Network -> Port 3306 -> Weak Credentials -> DB Access',
-    'postgresql':    'Attacker -> Network -> Port 5432 -> Empty Password -> DB Access',
-    'vnc':           'Attacker -> Network -> Port 5900 -> Default Login -> Desktop Control',
-    'phpmyadmin':    'Attacker -> /phpMyAdmin -> Brute Force -> DB Admin -> RCE',
-    'phpinfo':       'Attacker -> phpinfo.php -> Config Leak -> Targeted Exploit',
-    'smb':           'Attacker -> Port 445 -> SMB Exploit -> Lateral Movement',
-    'ssh':           'Attacker -> Port 22 -> Brute Force -> Remote Shell',
-    'htpasswd':      'Attacker -> /.htpasswd -> Hash Download -> Crack -> Auth Bypass',
-    'cve-2020-1938': 'Attacker -> AJP Port -> Ghostcat Exploit -> File Read -> RCE',
-    'cve-2011-2523': 'Attacker -> vsftpd -> Backdoor Trigger -> Root Shell',
-    'directory':     'Attacker -> Directory Listing -> File Enum -> Sensitive Data',
-    'irc':           'Attacker -> IRC Port -> Version Detect -> Exploit -> RCE',
-    'rmi':           'Attacker -> RMI Port -> Deserialization -> RCE',
-    'smtp':          'Attacker -> Port 25 -> User Enum -> Phishing or Relay',
-    'nfs':           'Attacker -> NFS Port -> Mount Share -> File Access',
-    'wordpress':     'Attacker -> WPScan -> Plugin Vuln -> Admin Access -> RCE',
-    'apache':        'Attacker -> Apache Version -> CVE Search -> Exploit -> Compromise',
-    'htaccess':      'Attacker -> .htaccess -> Config Read -> Bypass -> Restricted Access',
-}
-
 
 def clean(text):
     if not text:
@@ -119,23 +107,29 @@ def truncate(text, max_len):
     return text
 
 
-def get_scan_data(scan_id):
+def get_scan_data(scan_id, enrich=True, progress_callback=None):
+    """
+    Returns (scan_dict, findings_list). When enrich=True (the
+    default), each finding is extended with real CVE/CWE/CVSS/
+    MITRE/attack-path data from the live enrichment pipeline --
+    see reports/report_enrichment.py -- instead of relying on the
+    generic severity-based CVSS range and keyword-matched attack
+    path used previously.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT * FROM scans WHERE id=?', (scan_id,))
-    scan = dict(cursor.fetchone())
-    cursor.execute('''
-        SELECT * FROM findings WHERE scan_id=?
-        ORDER BY CASE severity
-            WHEN "Critical" THEN 0
-            WHEN "High"     THEN 1
-            WHEN "Medium"   THEN 2
-            WHEN "Low"      THEN 3
-            WHEN "Info"     THEN 4
-            ELSE 5 END
-    ''', (scan_id,))
-    findings = [dict(row) for row in cursor.fetchall()]
+    scan_row = cursor.fetchone()
+    scan = dict(scan_row) if scan_row else {}
     conn.close()
+
+    findings = get_findings_with_db_columns(scan_id)
+
+    if enrich:
+        findings = enrich_findings_for_report(
+            findings, progress_callback=progress_callback
+        )
+
     return scan, findings
 
 
@@ -161,12 +155,112 @@ def get_finding_id(severity, index):
     return f"{prefix}-{index:03d}"
 
 
-def get_attack_path(title, asset):
-    combined = (title + ' ' + (asset or '')).lower()
-    for keyword, path in ATTACK_PATHS.items():
-        if keyword in combined:
-            return path
+def get_cvss_display(finding):
+    """
+    Real CVSS score from live enrichment when available (e.g.
+    "7.5" from an actual NVD lookup), falling back to the generic
+    severity-based range only when no real score was found for
+    this specific finding.
+    """
+    score = finding.get('cvss_score')
+    if score is not None:
+        try:
+            return f"{float(score):.1f}"
+        except (TypeError, ValueError):
+            return str(score)
+    return SEVERITY_CVSS_FALLBACK.get(
+        finding.get('severity', 'Info'), 'N/A'
+    )
+
+
+def get_attack_path_display(finding):
+    """
+    Real AI-generated attack path from live enrichment (the same
+    text shown in the GUI's finding detail view) instead of the
+    old static keyword-matched ATTACK_PATHS table. Returns None if
+    enrichment didn't produce one for this finding (e.g. no API
+    key configured, or the call failed) -- callers should treat
+    None the same way the old function treated "no match".
+    """
+    path = finding.get('attack_path')
+    if path and str(path).strip():
+        return str(path).strip()
     return None
+
+
+def split_attack_path_steps(text):
+    """
+    Converts long AI attack path text into clean report bullets.
+    Handles bullet points, numbered steps, and long command-heavy lines.
+    """
+    if not text:
+        return []
+
+    text = clean(str(text))
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+
+    # Normalise common bullet styles.
+    text = text.replace('•', '\n- ')
+    text = text.replace('– ', '\n- ')
+    text = text.replace('* ', '\n- ')
+
+    raw_lines = []
+    for line in text.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+
+        # Remove duplicated leading bullets / numbering.
+        line = re.sub(r'^\s*[-]+\s*', '', line)
+        line = re.sub(r'^\s*\d+[\).\s-]+\s*', '', line)
+
+        if line:
+            raw_lines.append(line)
+
+    if not raw_lines:
+        raw_lines = [text.strip()]
+
+    # Split very long text into safer chunks at sentence boundaries.
+    steps = []
+    for line in raw_lines:
+        if len(line) <= 260:
+            steps.append(line)
+            continue
+
+        chunks = re.split(r'(?<=[.!?])\s+(?=[A-Z])', line)
+        for chunk in chunks:
+            chunk = chunk.strip()
+            if chunk:
+                steps.append(chunk)
+
+    return steps
+
+
+def pdf_bullet_list(pdf, steps, color=(180, 60, 60), max_steps=6):
+    """
+    Prints attack path steps neatly using bullets, indentation and wrapping.
+    This avoids long command lines stretching across the PDF page.
+    """
+    pdf.set_font('Times', '', 11)
+    pdf.set_text_color(*color)
+
+    for step in steps[:max_steps]:
+        step = truncate(step, 230)
+        pdf.set_x(18)
+        pdf.cell(5, 6, '-', ln=False)
+        pdf.set_x(23)
+        pdf.multi_cell(167, 6, clean(step), align='J')
+        pdf.ln(1)
+
+    if len(steps) > max_steps:
+        pdf.set_x(23)
+        pdf.set_font('Times', 'I', 10)
+        pdf.set_text_color(120, 120, 120)
+        pdf.multi_cell(
+            167, 6,
+            clean(f"... {len(steps) - max_steps} additional step(s) truncated in summary.")
+        )
+        pdf.ln(1)
 
 
 def build_pie_chart(counts):
@@ -176,11 +270,12 @@ def build_pie_chart(counts):
 
     labels, sizes, colors = [], [], []
     color_map = {
-        'Critical': '#8b0000',
-        'High':     '#e94560',
-        'Medium':   '#ff8c00',
-        'Low':      '#b49600',
-        'Info':     '#4a9eff',
+        # Same cleaner palette used throughout the report
+        'Critical': '#991b1b',
+        'High':     '#ea580c',
+        'Medium':   '#f59e0b',
+        'Low':      '#22c55e',
+        'Info':     '#3b82f6',
     }
     for sev in ['Critical', 'High', 'Medium', 'Low', 'Info']:
         if counts.get(sev, 0) > 0:
@@ -192,13 +287,21 @@ def build_pie_chart(counts):
     ax.set_facecolor('white')
     if sizes:
         wedges, texts, autotexts = ax.pie(
-            sizes, labels=labels, colors=colors,
-            autopct='%1.1f%%', startangle=90,
+            sizes,
+            labels=labels,
+            colors=colors,
+            autopct='%1.1f%%',
+            startangle=90,
+            counterclock=False,
+            pctdistance=0.68,
+            labeldistance=1.12,
+            wedgeprops={'linewidth': 1.0, 'edgecolor': 'white'},
             textprops={'color': '#333333', 'fontsize': 9}
         )
         for at in autotexts:
-            at.set_color('#333333')
+            at.set_color('white')
             at.set_fontsize(8)
+            at.set_fontweight('bold')
     ax.set_title(
         'Findings by Severity',
         color='#333333', fontsize=11, pad=10,
@@ -305,10 +408,12 @@ def generate_executive_summary(scan, findings, counts):
     return clean(para)
 
 
-def generate_pdf(scan_id, output_path):
+def generate_pdf(scan_id, output_path, enrich=True, progress_callback=None):
     from fpdf import FPDF
 
-    scan, findings = get_scan_data(scan_id)
+    scan, findings = get_scan_data(
+        scan_id, enrich=enrich, progress_callback=progress_callback
+    )
     counts = count_by_severity(findings)
     now    = datetime.now().strftime('%d %B %Y %H:%M')
 
@@ -563,8 +668,9 @@ def generate_pdf(scan_id, output_path):
         'All findings are classified according to standard '
         'vulnerability severity levels based on CVSS scoring '
         'guidelines. The table below defines each severity level, '
-        'its CVSS range, business impact and recommended '
-        'remediation timeline.'
+        'its typical CVSS range, business impact and recommended '
+        'remediation timeline. Individual findings below show '
+        'their actual CVSS score where one was identified.'
     )
     pdf.ln(6)
 
@@ -588,7 +694,7 @@ def generate_pdf(scan_id, output_path):
         pdf.set_text_color(40, 40, 40)
         pdf.set_font('Times', '', 11)
         pdf.cell(
-            28, 8, SEVERITY_CVSS[sev],
+            28, 8, SEVERITY_CVSS_FALLBACK[sev],
             border=1, align='C', ln=False
         )
         pdf.cell(95, 8, impact, border=1, ln=False)
@@ -628,7 +734,10 @@ def generate_pdf(scan_id, output_path):
         'testing environment for educational and research purposes. '
         'All testing was performed using AutoRed v1.0, a GUI-based '
         'reconnaissance automation platform developed as a Final '
-        'Year Project at Asia Pacific University (APU).'
+        'Year Project at Asia Pacific University (APU). CVE, CWE, '
+        'and MITRE ATT&CK data shown in this report was retrieved '
+        'live from the National Vulnerability Database (NVD), '
+        'CIRCL, and MITRE ATT&CK during report generation.'
     )
     pdf.ln(8)
 
@@ -650,7 +759,10 @@ def generate_pdf(scan_id, output_path):
         ('5. Classification',
          'All findings automatically parsed, normalized and '
          'severity-scored based on CVSS guidelines.'),
-        ('6. Reporting',
+        ('6. Enrichment',
+         'Each finding cross-referenced against NVD, CIRCL, and '
+         'MITRE ATT&CK for CVE, CWE, and technique mapping.'),
+        ('7. Reporting',
          'Findings aggregated with business impact, '
          'attack paths and remediation guidance.'),
     ]
@@ -693,7 +805,7 @@ def generate_pdf(scan_id, output_path):
     pdf.set_font('Times', 'B', 11)
     pdf.set_fill_color(233, 69, 96)
     pdf.set_text_color(255, 255, 255)
-    sum_cols = ['Severity', 'Count', 'CVSS', 'Business Impact', 'Action']
+    sum_cols = ['Severity', 'Count', 'CVSS Range', 'Business Impact', 'Action']
     sum_ws   = [28, 15, 26, 88, 28]
     for c, w in zip(sum_cols, sum_ws):
         pdf.cell(
@@ -715,7 +827,7 @@ def generate_pdf(scan_id, output_path):
             border=1, align='C', ln=False
         )
         pdf.cell(
-            26, 8, SEVERITY_CVSS[sev],
+            26, 8, SEVERITY_CVSS_FALLBACK[sev],
             border=1, align='C', ln=False
         )
         pdf.cell(88, 8, impact, border=1, ln=False)
@@ -774,6 +886,7 @@ def generate_pdf(scan_id, output_path):
             severity, sev_counters[severity]
         )
         color = SEVERITY_COLORS_RGB.get(severity, (100, 100, 100))
+        cvss_display = get_cvss_display(finding)
 
         pdf.set_fill_color(245, 245, 245)
         pdf.set_draw_color(*color)
@@ -801,7 +914,7 @@ def generate_pdf(scan_id, output_path):
         pdf.cell(16, 7, 'CVSS:', ln=False)
         pdf.set_font('Times', '', 11)
         pdf.set_text_color(40, 40, 40)
-        pdf.cell(26, 7, SEVERITY_CVSS[severity], ln=False)
+        pdf.cell(26, 7, cvss_display, ln=False)
 
         pdf.set_font('Times', 'B', 11)
         pdf.set_text_color(80, 80, 80)
@@ -834,6 +947,46 @@ def generate_pdf(scan_id, output_path):
             truncate(finding.get('asset', 'N/A'), 85),
             ln=True
         )
+
+        # ── Real CVE / CWE / MITRE row (from live enrichment) ──
+        cve_id  = finding.get('cve_id')
+        cwe_id  = finding.get('cwe_id')
+        tech_id = finding.get('mitre_tech_id')
+
+        if cve_id or cwe_id or tech_id:
+            pdf.set_font('Times', 'B', 11)
+            pdf.set_text_color(80, 80, 80)
+
+            if cve_id:
+                pdf.cell(14, 7, 'CVE:', ln=False)
+                pdf.set_font('Times', '', 11)
+                pdf.set_text_color(30, 80, 160)
+                pdf.cell(34, 7, clean(cve_id), ln=False)
+                pdf.set_font('Times', 'B', 11)
+                pdf.set_text_color(80, 80, 80)
+
+            if cwe_id:
+                pdf.cell(14, 7, 'CWE:', ln=False)
+                pdf.set_font('Times', '', 11)
+                pdf.set_text_color(180, 110, 0)
+                cwe_text = clean(cwe_id)
+                if finding.get('cwe_name'):
+                    cwe_text += f" ({truncate(finding['cwe_name'], 30)})"
+                pdf.cell(60, 7, cwe_text, ln=False)
+                pdf.set_font('Times', 'B', 11)
+                pdf.set_text_color(80, 80, 80)
+
+            if tech_id:
+                pdf.cell(18, 7, 'MITRE:', ln=False)
+                pdf.set_font('Times', '', 11)
+                pdf.set_text_color(120, 60, 180)
+                mitre_text = clean(tech_id)
+                if finding.get('mitre_technique'):
+                    mitre_text += f" {truncate(finding['mitre_technique'], 25)}"
+                pdf.cell(0, 7, mitre_text, ln=True)
+            else:
+                pdf.ln(7)
+
         pdf.ln(2)
 
         desc = str(finding.get('description', '') or '')
@@ -844,16 +997,19 @@ def generate_pdf(scan_id, output_path):
         pdf.field_label('Business Impact:')
         pdf.field_value(BUSINESS_IMPACT.get(severity, ''), 200)
 
-        attack_path = get_attack_path(
-            finding.get('title', ''),
-            finding.get('asset', '')
-        )
+        # Real attack path from live AI enrichment, replacing the
+        # old static keyword-matched ATTACK_PATHS table.
+        attack_path = get_attack_path_display(finding)
         if attack_path:
             pdf.field_label('Attack Path:')
-            pdf.set_font('Times', '', 12)
-            pdf.set_text_color(180, 60, 60)
-            pdf.cell(0, 6, clean(attack_path), ln=True)
-            pdf.ln(1)
+            attack_steps = split_attack_path_steps(attack_path)
+            if attack_steps:
+                pdf_bullet_list(pdf, attack_steps, color=(180, 60, 60), max_steps=6)
+            else:
+                pdf.set_font('Times', '', 11)
+                pdf.set_text_color(180, 60, 60)
+                pdf.multi_cell(0, 6, clean(truncate(attack_path, 600)), align='J')
+                pdf.ln(1)
 
         rec = str(finding.get('recommendation', '') or '')
         if rec:
@@ -961,12 +1117,14 @@ def generate_pdf(scan_id, output_path):
     return output_path
 
 
-def generate_docx(scan_id, output_path):
+def generate_docx(scan_id, output_path, enrich=True, progress_callback=None):
     from docx import Document
     from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-    scan, findings = get_scan_data(scan_id)
+    scan, findings = get_scan_data(
+        scan_id, enrich=enrich, progress_callback=progress_callback
+    )
     counts = count_by_severity(findings)
     now    = datetime.now().strftime('%d %B %Y %H:%M')
 
@@ -1066,7 +1224,7 @@ def generate_docx(scan_id, output_path):
     sum_tbl.style = 'Table Grid'
     hdr = sum_tbl.rows[0].cells
     for i, h in enumerate(
-        ['Severity', 'Count', 'CVSS', 'Action']
+        ['Severity', 'Count', 'CVSS Range', 'Action']
     ):
         hdr[i].text = h
         for para in hdr[i].paragraphs:
@@ -1079,7 +1237,7 @@ def generate_docx(scan_id, output_path):
         row = sum_tbl.add_row().cells
         row[0].text = sev
         row[1].text = str(counts.get(sev, 0))
-        row[2].text = SEVERITY_CVSS[sev]
+        row[2].text = SEVERITY_CVSS_FALLBACK[sev]
         row[3].text = REMEDIATION_EFFORT[sev]
         color = SEVERITY_COLORS_RGB.get(sev, (0, 0, 0))
         for para in row[0].paragraphs:
@@ -1102,6 +1260,7 @@ def generate_docx(scan_id, output_path):
         sev_counters[sev] += 1
         fid   = get_finding_id(sev, sev_counters[sev])
         color = SEVERITY_COLORS_RGB.get(sev, (100, 100, 100))
+        cvss_display = get_cvss_display(finding)
 
         h = doc.add_heading(
             clean(
@@ -1116,13 +1275,27 @@ def generate_docx(scan_id, output_path):
             run.font.size = Pt(13)
 
         meta = doc.add_paragraph()
-        for k, v in [
+        meta_fields = [
             ('Severity',  sev),
-            ('CVSS',      SEVERITY_CVSS[sev]),
+            ('CVSS',      cvss_display),
             ('Tool',      finding.get('tool', 'N/A')),
             ('Asset',     truncate(finding.get('asset','N/A'), 60)),
             ('Action',    REMEDIATION_EFFORT[sev]),
-        ]:
+        ]
+        if finding.get('cve_id'):
+            meta_fields.append(('CVE', finding['cve_id']))
+        if finding.get('cwe_id'):
+            cwe_val = finding['cwe_id']
+            if finding.get('cwe_name'):
+                cwe_val += f" ({finding['cwe_name']})"
+            meta_fields.append(('CWE', cwe_val))
+        if finding.get('mitre_tech_id'):
+            mitre_val = finding['mitre_tech_id']
+            if finding.get('mitre_technique'):
+                mitre_val += f" {finding['mitre_technique']}"
+            meta_fields.append(('MITRE ATT&CK', mitre_val))
+
+        for k, v in meta_fields:
             kr = meta.add_run(f'{k}: ')
             kr.bold = True
             kr.font.name = 'Times New Roman'
@@ -1133,33 +1306,30 @@ def generate_docx(scan_id, output_path):
             vr.font.size = Pt(12)
             vr.font.color.rgb = RGBColor(50, 50, 50)
 
-        for section, key in [
-            ('Description',    'description'),
-            ('Business Impact', None),
-            ('Attack Path',     None),
-            ('Recommendation', 'recommendation'),
-        ]:
+        sections = [
+            ('Description', finding.get('description', '')),
+            ('Business Impact', BUSINESS_IMPACT.get(sev, '')),
+        ]
+
+        attack_path = get_attack_path_display(finding)
+        sections.append((
+            'Attack Path',
+            attack_path if attack_path
+            else 'Not identified for this finding.'
+        ))
+        sections.append((
+            'Recommendation', finding.get('recommendation', '')
+        ))
+
+        for section_label, value in sections:
             p  = doc.add_paragraph()
-            kr = p.add_run(section + ': ')
+            kr = p.add_run(section_label + ': ')
             kr.bold = True
             kr.font.name = 'Times New Roman'
             kr.font.size = Pt(12)
             kr.font.color.rgb = RGBColor(30, 80, 160)
 
-            if key:
-                val = truncate(
-                    str(finding.get(key, '') or ''), 300
-                )
-            elif section == 'Business Impact':
-                val = clean(BUSINESS_IMPACT.get(sev, ''))
-            else:
-                ap = get_attack_path(
-                    finding.get('title', ''),
-                    finding.get('asset', '')
-                )
-                val = clean(ap) if ap \
-                    else 'Not identified for this finding.'
-
+            val = clean(truncate(str(value or ''), 600))
             vr = p.add_run(val)
             vr.font.name = 'Times New Roman'
             vr.font.size = Pt(12)
@@ -1171,7 +1341,9 @@ def generate_docx(scan_id, output_path):
         'This assessment was conducted using AutoRed v1.0, '
         'a GUI-based reconnaissance automation platform developed '
         'as a Final Year Project at Asia Pacific University (APU). '
-        'All testing was performed within an authorized environment.'
+        'All testing was performed within an authorized environment. '
+        'CVE, CWE, and MITRE ATT&CK data was retrieved live from '
+        'NVD, CIRCL, and MITRE ATT&CK during report generation.'
     )
     if mp.runs:
         mp.runs[0].font.name = 'Times New Roman'
@@ -1234,8 +1406,10 @@ if __name__ == '__main__':
     scan_id   = 27
     pdf_path  = f'storage/{scan_id}/report/report.pdf'
     docx_path = f'storage/{scan_id}/report/report.docx'
-    print("[*] Generating PDF...")
+    print("[*] Generating PDF (live CVE/CWE/MITRE enrichment per "
+          "finding, may take a while)...")
     generate_pdf(scan_id, pdf_path)
     print("[*] Generating DOCX...")
     generate_docx(scan_id, docx_path)
     print("[+] Done!")
+                         
