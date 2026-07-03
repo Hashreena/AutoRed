@@ -1,0 +1,286 @@
+"""
+AutoRed — CVSS Predictor
+========================
+
+Derives a CVSS v3.1 base score for findings that have NO published CVE.
+
+Two pieces:
+  1. cvss31_base(vector)      — the exact, official CVSS v3.1 base-score
+                                 equation (FIRST.org). Deterministic — the
+                                 number is computed, never hand-typed.
+  2. derive_cvss_from_cwe(..) — maps a CWE id to a representative v3.1
+                                 vector, then runs (1) to produce a score.
+
+This replaces the hand-typed scores in PROTOCOL_WEAKNESS_DB: instead of
+storing a number someone guessed, we store a vector (the qualitative
+judgement) and let the official formula compute the score.
+
+The CWE -> vector table is intentionally COARSE: it captures the typical
+worst-reasonable case for each weakness class. A service-aware or ML layer
+can refine the vector later; the score computation below stays the same.
+"""
+
+import math
+
+# ── Official CVSS v3.1 metric weights ─────────────────────────
+_AV  = {'N': 0.85, 'A': 0.62, 'L': 0.55, 'P': 0.20}
+_AC  = {'L': 0.77, 'H': 0.44}
+_UI  = {'N': 0.85, 'R': 0.62}
+_PR_UNCHANGED = {'N': 0.85, 'L': 0.62, 'H': 0.27}
+_PR_CHANGED   = {'N': 0.85, 'L': 0.68, 'H': 0.50}
+_CIA = {'H': 0.56, 'L': 0.22, 'N': 0.00}
+
+# Map single-letter metric values to the words NVD uses, so derived
+# findings render identically to real NVD findings in the UI.
+_AV_WORD = {'N': 'NETWORK', 'A': 'ADJACENT_NETWORK',
+            'L': 'LOCAL', 'P': 'PHYSICAL'}
+_AC_WORD = {'L': 'LOW', 'H': 'HIGH'}
+_PR_WORD = {'N': 'NONE', 'L': 'LOW', 'H': 'HIGH'}
+_UI_WORD = {'N': 'NONE', 'R': 'REQUIRED'}
+
+
+def _roundup(value):
+    """CVSS v3.1 roundUp: ceil to one decimal place (spec appendix A)."""
+    int_input = round(value * 100000)
+    if int_input % 10000 == 0:
+        return int_input / 100000.0
+    return (math.floor(int_input / 10000) + 1) / 10.0
+
+
+def severity_label(score):
+    """CVSS v3.1 qualitative rating."""
+    if score == 0:
+        return 'NONE'
+    if score < 4.0:
+        return 'LOW'
+    if score < 7.0:
+        return 'MEDIUM'
+    if score < 9.0:
+        return 'HIGH'
+    return 'CRITICAL'
+
+
+def parse_vector(vector):
+    """'CVSS:3.1/AV:N/AC:L/...' -> {'AV':'N','AC':'L',...}. Tolerant."""
+    metrics = {}
+    for part in str(vector).split('/'):
+        if ':' not in part:
+            continue
+        k, v = part.split(':', 1)
+        k = k.strip().upper()
+        v = v.strip().upper()
+        if k in ('AV', 'AC', 'PR', 'UI', 'S', 'C', 'I', 'A'):
+            metrics[k] = v
+    return metrics
+
+
+def cvss31_base(vector):
+    """
+    Compute the official CVSS v3.1 base score + sub-scores from a vector.
+    Returns a dict, or None if the vector is missing required metrics.
+    """
+    m = parse_vector(vector)
+    required = ('AV', 'AC', 'PR', 'UI', 'S', 'C', 'I', 'A')
+    if not all(k in m for k in required):
+        return None
+
+    scope_changed = (m['S'] == 'C')
+
+    iss = 1 - ((1 - _CIA[m['C']]) *
+               (1 - _CIA[m['I']]) *
+               (1 - _CIA[m['A']]))
+
+    if scope_changed:
+        impact = 7.52 * (iss - 0.029) - 3.25 * (iss - 0.02) ** 15
+    else:
+        impact = 6.42 * iss
+
+    pr = (_PR_CHANGED if scope_changed else _PR_UNCHANGED)[m['PR']]
+    exploitability = 8.22 * _AV[m['AV']] * _AC[m['AC']] * pr * _UI[m['UI']]
+
+    if impact <= 0:
+        base = 0.0
+    elif scope_changed:
+        base = _roundup(min(1.08 * (impact + exploitability), 10))
+    else:
+        base = _roundup(min(impact + exploitability, 10))
+
+    return {
+        'base_score':      round(base, 1),
+        'severity':        severity_label(base),
+        'impact':          round(impact, 1),
+        'exploitability':  round(exploitability, 1),
+        'metrics':         m,
+    }
+
+
+def exploit_level_from_subscore(e):
+    """Match the existing Easy/Moderate/Difficult banding in the app."""
+    if e is None:
+        return 'Unknown'
+    if e >= 3.5:
+        return 'Easy'
+    if e >= 2.0:
+        return 'Moderate'
+    return 'Difficult'
+
+
+# ── CWE -> representative CVSS v3.1 vector ─────────────────────
+# One entry per weakness class. The vector encodes the qualitative
+# judgement; the score is then COMPUTED by cvss31_base above.
+CWE_CVSS_VECTORS = {
+    'CWE-319':  ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N',
+                 'Cleartext transmission exposes sensitive data over the network.'),
+    'CWE-521':  ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                 'Weak/empty password requirements allow full account takeover.'),
+    'CWE-1392': ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                 'Default credentials grant complete unauthorized access.'),
+    'CWE-306':  ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                 'Missing authentication on a critical function exposes full access.'),
+    'CWE-548':  ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N',
+                 'Directory listing leaks file structure (limited confidentiality).'),
+    'CWE-200':  ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N',
+                 'Information exposure to an unauthorized actor.'),
+    'CWE-1021': ('CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N',
+                 'UI redressing / clickjacking; requires user interaction.'),
+    'CWE-942':  ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N',
+                 'Permissive CORS enables cross-origin data theft.'),
+    'CWE-307':  ('CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N',
+                 'Insufficient brute-force protection (higher attack complexity).'),
+    'CWE-284':  ('CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H',
+                 'Improper access control with low-privilege foothold.'),
+    'CWE-326':  ('CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N',
+                 'Weak encryption; exploitation requires MITM (high complexity).'),
+    'CWE-434':  ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                 'Unrestricted file upload can lead to remote code execution.'),
+    'CWE-912':  ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                 'Backdoor / hidden functionality gives full remote control.'),
+    'CWE-89':   ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                 'SQL injection enables full database compromise.'),
+    'CWE-79':   ('CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N',
+                 'Cross-site scripting; requires victim interaction, scope change.'),
+    'CWE-22':   ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N',
+                 'Path traversal exposes files outside the web root.'),
+    'CWE-78':   ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                 'OS command injection allows arbitrary command execution.'),
+    'CWE-121':  ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                 'Stack buffer overflow may allow code execution.'),
+    'CWE-352':  ('CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:N',
+                 'CSRF performs unauthorized state-changing actions (integrity).'),
+    'CWE-918':  ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N',
+                 'SSRF lets the server reach unintended internal targets.'),
+    'CWE-611':  ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N',
+                 'XXE allows reading internal files via XML parsing.'),
+    'CWE-502':  ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                 'Unsafe deserialization can lead to remote code execution.'),
+    'CWE-601':  ('CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:N',
+                 'Open redirect aids phishing; limited direct impact.'),
+    'CWE-125':  ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N',
+                 'Out-of-bounds read can leak sensitive memory.'),
+}
+
+# Conservative default when the CWE isn't in the table.
+_DEFAULT_VECTOR = ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N',
+                   'Generic exposure — conservative information-disclosure baseline.')
+
+
+def _normalise_cwe(cwe_id):
+    """Accept 'CWE-319', 'cwe-319', '319', 'CWE-319 — name' -> 'CWE-319'."""
+    if not cwe_id:
+        return None
+    s = str(cwe_id).upper().strip()
+    # grab the first CWE-number token
+    import re
+    mtch = re.search(r'CWE[-\s]?(\d+)', s)
+    if mtch:
+        return f"CWE-{mtch.group(1)}"
+    if s.isdigit():
+        return f"CWE-{s}"
+    return None
+
+
+def derive_cvss_from_cwe(cwe_id, finding=None):
+    """
+    Build an nvd_best-shaped dict for a finding with no CVE, using a
+    CWE-derived vector scored by the official CVSS v3.1 formula.
+
+    The returned dict matches the shape enrich_finding/the UI expect, and
+    is clearly tagged (is_derived, cvss_source, cve_id prefixed 'No CVE').
+    """
+    norm = _normalise_cwe(cwe_id)
+    vector, rationale = CWE_CVSS_VECTORS.get(norm, _DEFAULT_VECTOR)
+
+    calc = cvss31_base(vector)
+    if not calc:
+        return None
+
+    m   = calc['metrics']
+    num = norm.split('-')[1] if norm else None
+    cwe_url = (
+        f"https://cwe.mitre.org/data/definitions/{num}.html"
+        if num else ''
+    )
+
+    return {
+        'cve_id':            f"No CVE — Derived from {norm or 'CWE'}",
+        'description':       rationale,
+        'cvss_score':        calc['base_score'],
+        'cvss_version':      '3.1',
+        'cvss_severity':     calc['severity'],
+        'cvss_vector':       vector,
+        'published':         'N/A',
+        'last_modified':     'N/A',
+        'attack_vector':     _AV_WORD.get(m['AV'], m['AV']),
+        'attack_complexity': _AC_WORD.get(m['AC'], m['AC']),
+        'privileges_req':    _PR_WORD.get(m['PR'], m['PR']),
+        'user_interaction':  _UI_WORD.get(m['UI'], m['UI']),
+        'exploitability':    calc['exploitability'],
+        'exploit_level':     exploit_level_from_subscore(
+            calc['exploitability']
+        ),
+        'exploit_reason':    (
+            f"Score computed from a {norm or 'generic'} baseline "
+            f"vector via the CVSS 3.1 formula"
+        ),
+        'weaknesses':        [norm] if norm else [],
+        'references':        [],
+        'nvd_url':           cwe_url,
+        'is_fallback':       True,
+        'is_derived':        True,
+        'cvss_source':       'CWE → CVSS 3.1 (computed)',
+    }
+
+
+if __name__ == '__main__':
+    print("=" * 60)
+    print("AutoRed — CVSS Predictor self-test")
+    print("=" * 60)
+
+    # Validate the formula against known CVSS v3.1 reference scores.
+    checks = [
+        ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N', 7.5),
+        ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', 9.8),
+        ('CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H', 8.8),
+        ('CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N', 5.9),
+        ('CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N', 6.1),
+        ('CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N', 7.4),
+        ('CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H', 8.1),
+        ('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N', 5.3),
+        ('CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H', 7.8),
+    ]
+    print("\nFormula validation against reference scores:")
+    all_ok = True
+    for vec, expected in checks:
+        got = cvss31_base(vec)['base_score']
+        ok  = (got == expected)
+        all_ok &= ok
+        print(f"  {'OK ' if ok else 'BAD'} {vec}  "
+              f"expected {expected}  got {got}")
+    print("\n  -> ALL CORRECT" if all_ok else "\n  -> MISMATCH")
+
+    print("\nCWE -> derived CVSS samples:")
+    for cwe in ['CWE-319', 'CWE-306', 'CWE-548', 'CWE-89',
+                'CWE-79', 'CWE-9999']:
+        d = derive_cvss_from_cwe(cwe)
+        print(f"  {cwe:9s} -> {d['cvss_score']:>4}  "
+              f"{d['cvss_severity']:8s} {d['cvss_vector']}")
