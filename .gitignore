@@ -31,3 +31,13 @@ storage/mitre_attack_cache.json
 
 # Logs
 *.log
+
+# Scan report output folders inside reports/
+reports/http_*/
+reports/main
+
+# NVD cache
+backend/nvd_cache/
+
+# Exports folder
+exports/
