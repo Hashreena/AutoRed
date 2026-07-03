@@ -1,19 +1,28 @@
 """
 AutoRed — Scope / Authorization backend
 ========================================
-
 Two DB tables:
   scope_blocklist     — IPs/domains blocked by default
   authorized_targets  — allowlist that overrides the blocklist
 
 Full flow:
-  1. Add target to blocklist (blocked by default)
-  2. Company requests scan → authorization request sent
-  3. CISO approves via 6-digit code → target added to allowlist
-  4. Scan runs (target passes validate_target check)
-  5. When engagement done → press Remove in UI → back to blocklist
-"""
+  1. Default blocklist is seeded on first run (Malaysian banks,
+     government, hospitals, critical infrastructure, private IPs)
+  2. User enters a target in the Scan Wizard
+  3. validate_target() checks blocklist → if blocked, returns
+     a specific reason explaining why
+  4. User can override by adding the target to the Authorized
+     Targets Manager with written authorization
+  5. On re-scan, target passes the allowlist check → allowed
 
+Blocklist sources referenced:
+  - Bank Negara Malaysia (BNM) licensed institutions
+  - National Cyber Security Agency Malaysia (NACSA)
+  - CyberSecurity Malaysia (CSM)
+  - Ministry of Health Malaysia (MOH)
+  - RFC 1918 private IP ranges
+  - Computer Crimes Act 1997 (Malaysia)
+"""
 import ipaddress
 import os
 import random
@@ -21,7 +30,6 @@ import smtplib
 from datetime             import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text      import MIMEText
-
 from backend.db import get_connection
 
 
@@ -78,6 +86,17 @@ def _migrate():
     conn.commit()
     conn.close()
 
+    # Seed the default blocklist on first run
+    try:
+        from backend.default_blocklist import (
+            seed_default_blocklist,
+            is_blocklist_seeded,
+        )
+        if not is_blocklist_seeded():
+            seed_default_blocklist()
+    except Exception as e:
+        print(f"[!] Default blocklist seeding failed: {e}")
+
 
 _migrate()
 
@@ -112,20 +131,66 @@ def _matches_entry(target, entry):
     return False
 
 
+def _categorise_blocked_target(target, reason):
+    """
+    Return a user-friendly category and action message
+    based on the blocked target and its reason.
+    """
+    t = target.lower()
+    r = (reason or "").lower()
+
+    if any(k in r for k in ["armed forces", "army", "navy", "air force", "pdrm", "police", "mindef"]):
+        category = "Malaysian Security / Military Institution"
+        action   = "Scanning security and military infrastructure is a criminal offence under the Computer Crimes Act 1997 (Malaysia). You must obtain written authorization from the relevant authority."
+
+    elif any(k in r for k in ["bank", "bnm", "financial", "e-money", "payment", "paynet", "securities commission", "bursa"]):
+        category = "Licensed Financial Institution"
+        action   = "Scanning financial institutions requires written authorization from the institution and compliance with Bank Negara Malaysia (BNM) guidelines. Add this target to Authorized Targets with a valid engagement letter."
+
+    elif any(k in r for k in ["government", "gov.my", "nacsa", "mcmc", "cybersecurity"]):
+        category = "Malaysian Government Institution"
+        action   = "Scanning Malaysian government infrastructure requires written authorization. Refer to NACSA penetration testing guidelines before proceeding."
+
+    elif any(k in r for k in ["hospital", "healthcare", "medical", "health", "moh"]):
+        category = "Healthcare Institution"
+        action   = "Scanning healthcare systems may violate patient data protection laws under the Personal Data Protection Act 2010 (PDPA). Written authorization is required."
+
+    elif any(k in r for k in ["critical infrastructure", "electricity", "petronas", "gas", "airport", "airline", "telecommunications", "telco"]):
+        category = "Critical National Infrastructure"
+        action   = "Scanning critical national infrastructure without authorization may violate the Computer Crimes Act 1997 and Communications and Multimedia Act 1998."
+
+    elif any(k in r for k in ["private network", "rfc 1918", "loopback", "link-local"]):
+        category = "Private / Reserved IP Range"
+        action   = "This IP address belongs to a private or reserved range. Ensure you have explicit permission from the network owner before scanning internal infrastructure."
+
+    elif any(k in r for k in ["google", "microsoft", "amazon", "cloudflare"]):
+        category = "Major Public Infrastructure"
+        action   = "Scanning major public internet infrastructure is prohibited without explicit written authorization from the provider."
+
+    else:
+        category = "Restricted Target"
+        action   = "This target is on the AutoRed restricted list. Add it to the Authorized Targets Manager with valid written authorization to proceed."
+
+    return category, action
+
+
 def validate_target(target):
     """
-    Returns {'allowed': bool, 'reason': str, 'authorized': bool}.
+    Returns {'allowed': bool, 'reason': str, 'authorized': bool,
+             'category': str, 'action': str}.
 
     Logic:
       1. Is the target in the blocklist?  → if no  → allow
       2. Is the target in the allowlist (approved)? → if yes → allow
-      3. Otherwise → block with reason
+      3. Otherwise → block with detailed reason and category
     """
     if not target:
         return {
             'allowed':    False,
             'reason':     'No target specified.',
             'authorized': False,
+            'category':   '',
+            'action':     '',
         }
 
     # Check blocklist
@@ -140,7 +205,13 @@ def validate_target(target):
     conn.close()
 
     if blocked is None:
-        return {'allowed': True, 'reason': '', 'authorized': False}
+        return {
+            'allowed':    True,
+            'reason':     '',
+            'authorized': False,
+            'category':   '',
+            'action':     '',
+        }
 
     # Blocked — check allowlist override
     if is_authorized(target):
@@ -148,21 +219,30 @@ def validate_target(target):
             'allowed':    True,
             'reason':     '',
             'authorized': True,
+            'category':   '',
+            'action':     '',
             'note': (
                 'Target is in blocklist but has '
                 'approved authorization — allowed.'
             ),
         }
 
+    # Build detailed error message
+    category, action = _categorise_blocked_target(
+        target, blocked[1]
+    )
+
+    reason_msg = (
+        blocked[1] or
+        f"'{target}' is on the AutoRed restricted list."
+    )
+
     return {
         'allowed':    False,
         'authorized': False,
-        'reason': (
-            blocked[1] or
-            f"'{target}' is in the scope blocklist. "
-            f"Request written authorization via "
-            f"Authorized Targets Manager."
-        ),
+        'reason':     reason_msg,
+        'category':   category,
+        'action':     action,
     }
 
 
@@ -357,7 +437,6 @@ def send_approval_email(
 font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 Arial,sans-serif;color:#e6edf3;">
 <div style="max-width:560px;margin:0 auto;padding:32px 16px;">
-
   <div style="background:#0f172a;border:1px solid #1e293b;
   border-top:3px solid #e94560;border-radius:12px;
   padding:22px 26px;margin-bottom:20px;">
@@ -371,7 +450,6 @@ Arial,sans-serif;color:#e6edf3;">
       {datetime.now().strftime('%Y-%m-%d %H:%M')}
     </div>
   </div>
-
   <div style="background:#0f172a;border:1px solid #1e293b;
   border-radius:10px;padding:22px 24px;margin-bottom:20px;">
     <p style="margin:0 0 12px;font-size:14px;
@@ -428,7 +506,6 @@ Arial,sans-serif;color:#e6edf3;">
       and notify your security team immediately.
     </p>
   </div>
-
   <div style="text-align:center;font-size:11px;color:#334155;">
     AutoRed &nbsp;·&nbsp; APU FYP 2026
   </div>
