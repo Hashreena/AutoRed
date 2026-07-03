@@ -1,0 +1,56 @@
+# AutoRed — Reconnaissance and Attack Surface Assessment System
+# Install with: pip install -r requirements.txt
+
+# GUI
+PyQt6==6.11.0
+PyQt6-WebEngine==6.11.0
+pyqt6_sip==13.11.1
+
+# PDF report generation
+fpdf2==2.8.7
+reportlab==4.5.1
+
+# Charts and visualisation
+matplotlib==3.10.9
+numpy==2.4.4
+
+# HTTP requests (CVE enrichment, NVD, CIRCL, MITRE, Claude API)
+requests==2.34.2
+certifi==2026.6.17
+urllib3==2.7.0
+idna==3.13
+charset-normalizer==2.0.12
+
+# HTML parsing (WhatWeb, theHarvester output)
+beautifulsoup4==4.15.0
+lxml==6.1.0
+
+# Machine learning (CVSS prediction)
+scikit-learn==1.9.0
+scipy==1.17.1
+joblib==1.5.3
+
+# Word document export
+python-docx==1.2.0
+
+# Environment variables (.env file)
+python-dotenv
+
+# Data validation
+pydantic==2.13.4
+
+# Cryptography (used by requests/SSL)
+cryptography==49.0.0
+pyOpenSSL==26.3.0
+
+# Setuptools — pinned to fix dirsearch pkg_resources error on Python 3.13
+setuptools==69.5.1
+
+# XML parsing (nmap output)
+defusedxml==0.7.1
+
+# Pillow (image handling in PDF/charts)
+pillow==12.2.0
+
+# Networking
+PySocks==1.7.1
