@@ -1,5 +1,6 @@
 import os
 import ipaddress
+
 PROFILES = {
     'Production': {
         'rate_limit':   10,
@@ -20,12 +21,14 @@ PROFILES = {
         'nmap_timing': 'T4',
     },
 }
+
+
 def is_ip(target):
     """
     Returns True if target is an IP address (with or without port).
-    e.g. 192.168.1.1 → True
-         192.168.1.1:5001 → True
-         scanme.nmap.org → False
+    e.g. 192.168.1.1       → True
+         192.168.1.1:5001  → True
+         scanme.nmap.org   → False
     """
     try:
         host = target.split(':')[0]
@@ -33,22 +36,77 @@ def is_ip(target):
         return True
     except ValueError:
         return False
+
+
 def _host(target):
     """
     Strip port from target — returns just the hostname or IP.
     e.g. 192.168.179.128:5001 → 192.168.179.128
-         scanme.nmap.org → scanme.nmap.org
+         scanme.nmap.org       → scanme.nmap.org
     """
     return target.split(':')[0]
-def _prefix(target):
+
+
+def detect_scheme(target):
     """
-    Return correct URL scheme for target.
-    IP addresses (with or without port) → http
-    Domain names → https
+    Probe the target to detect whether it responds to HTTP or HTTPS.
+    Tries HTTP first, then HTTPS.
+    Accepts self-signed SSL certificates (verify=False).
+
+    Falls back to:
+      'http'  for IP targets
+      'https' for domain targets
+    if neither responds within 5 seconds.
+
+    Returns 'http' or 'https'.
     """
+    import requests
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    clean = (
+        target
+        .replace('https://', '')
+        .replace('http://', '')
+        .strip('/')
+    )
+
+    for scheme in ['http', 'https']:
+        try:
+            requests.get(
+                f"{scheme}://{clean}",
+                timeout=5,
+                verify=False,
+                allow_redirects=True,
+            )
+            print(f"[+] detect_scheme: {clean} responds to {scheme}://")
+            return scheme
+        except Exception:
+            continue
+
+    # Neither responded — use sensible default
+    default = 'http' if is_ip(target) else 'https'
+    print(
+        f"[!] detect_scheme: could not reach {clean} "
+        f"— defaulting to {default}://"
+    )
+    return default
+
+
+def _prefix(target, scheme=None):
+    """
+    Return the correct URL scheme for this target.
+    If scheme is already known (detected by detect_scheme and
+    passed from run_scan), use it directly.
+    Otherwise fall back to is_ip() heuristic.
+    """
+    if scheme:
+        return scheme
     return 'http' if is_ip(target) else 'https'
+
+
 # ── Nmap (+ vulners script for CVE detection) ─────────────────
-def build_nmap_command(target, profile, preset='quick'):
+def build_nmap_command(target, profile, preset='quick', scheme=None):
     p      = PROFILES[profile]
     timing = p['nmap_timing']
     out    = '-oX -'
@@ -78,17 +136,21 @@ def build_nmap_command(target, profile, preset='quick'):
             f"nmap -{timing} -sV {vulners} "
             f"--open {out} {target}"
         )
+
+
 # ── Subfinder ─────────────────────────────────────────────────
-def build_subfinder_command(target, profile, preset='quick'):
+def build_subfinder_command(target, profile, preset='quick', scheme=None):
     host = _host(target)
     if is_ip(target):
         return f"echo '{target}'"
     if preset == 'full':
         return f"subfinder -d {host} -silent -all"
     return f"subfinder -d {host} -silent"
+
+
 # ── httpx ─────────────────────────────────────────────────────
-def build_httpx_command(target, profile, preset='quick'):
-    prefix = _prefix(target)
+def build_httpx_command(target, profile, preset='quick', scheme=None):
+    prefix = _prefix(target, scheme)
     return (
         f"curl -s -o /dev/null -w "
         f"'{{\"url\":\"{prefix}://{target}\","
@@ -96,20 +158,24 @@ def build_httpx_command(target, profile, preset='quick'):
         f"\"title\":\"unknown\"}}' "
         f"{prefix}://{target}"
     )
+
+
 # ── WhatWeb ───────────────────────────────────────────────────
-def build_whatweb_command(target, profile, preset='quick'):
-    prefix     = _prefix(target)
+def build_whatweb_command(target, profile, preset='quick', scheme=None):
+    prefix     = _prefix(target, scheme)
     aggression = '-a 3' if preset == 'full' else ''
     return (
         f"whatweb {prefix}://{target} "
         f"--log-json=/tmp/whatweb_out.json "
         f"{aggression} -q".strip()
     )
+
+
 # ── ffuf ──────────────────────────────────────────────────────
-def build_ffuf_command(target, profile, preset='quick'):
+def build_ffuf_command(target, profile, preset='quick', scheme=None):
     p        = PROFILES[profile]
     rate     = p['rate_limit']
-    prefix   = _prefix(target)
+    prefix   = _prefix(target, scheme)
     wordlist = '/usr/share/wordlists/dirb/common.txt'
     big_wl   = (
         '/usr/share/wordlists/dirbuster/'
@@ -127,16 +193,20 @@ def build_ffuf_command(target, profile, preset='quick'):
         f"-w {wl} -rate {rate} "
         f"-o /tmp/ffuf_out.json -of json -s"
     )
+
+
 # ── Nikto ─────────────────────────────────────────────────────
-def build_nikto_command(target, profile, preset='quick'):
-    prefix = _prefix(target)
+def build_nikto_command(target, profile, preset='quick', scheme=None):
+    prefix = _prefix(target, scheme)
     tuning = '-Tuning 123bde ' if preset == 'full' else ''
     return (
         f"nikto -h {prefix}://{target} "
         f"{tuning}-nointeractive 2>/dev/null".strip()
     )
+
+
 # ── theHarvester ──────────────────────────────────────────────
-def build_theharvester_command(target, profile, preset='quick'):
+def build_theharvester_command(target, profile, preset='quick', scheme=None):
     host = _host(target)
     if is_ip(target):
         return "echo 'IP target - theHarvester skipped'"
@@ -149,8 +219,10 @@ def build_theharvester_command(target, profile, preset='quick'):
         f"theHarvester -d {host} -b {sources} "
         f"-f /tmp/harvester_out -q"
     )
+
+
 # ── DNSrecon ──────────────────────────────────────────────────
-def build_dnsrecon_command(target, profile, preset='quick'):
+def build_dnsrecon_command(target, profile, preset='quick', scheme=None):
     host = _host(target)
     if is_ip(target):
         return "echo 'IP target - DNSrecon skipped'"
@@ -159,11 +231,13 @@ def build_dnsrecon_command(target, profile, preset='quick'):
         f"dnsrecon -d {host} {extra}"
         f"-j /tmp/dnsrecon_out.json".strip()
     )
+
+
 # ── Gobuster ──────────────────────────────────────────────────
-def build_gobuster_command(target, profile, preset='quick'):
+def build_gobuster_command(target, profile, preset='quick', scheme=None):
     p       = PROFILES[profile]
     threads = p['threads']
-    prefix  = _prefix(target)
+    prefix  = _prefix(target, scheme)
     wl      = '/usr/share/wordlists/dirb/common.txt'
     big_wl  = (
         '/usr/share/wordlists/dirbuster/'
@@ -175,9 +249,11 @@ def build_gobuster_command(target, profile, preset='quick'):
         f"-w {wordlist} -t {threads} "
         f"-o /tmp/gobuster_out.txt -q --no-progress"
     )
+
+
 # ── Dirsearch ─────────────────────────────────────────────────
-def build_dirsearch_command(target, profile, preset='quick'):
-    prefix = _prefix(target)
+def build_dirsearch_command(target, profile, preset='quick', scheme=None):
+    prefix = _prefix(target, scheme)
     exts   = (
         '-e php,html,js,txt,bak,old,zip '
         if preset == 'full' else ''
@@ -187,17 +263,21 @@ def build_dirsearch_command(target, profile, preset='quick'):
         f"-o /tmp/dirsearch_out.txt "
         f"--format=plain -q 2>/dev/null".strip()
     )
+
+
 # ── WPScan ────────────────────────────────────────────────────
-def build_wpscan_command(target, profile, preset='quick'):
-    prefix = _prefix(target)
+def build_wpscan_command(target, profile, preset='quick', scheme=None):
+    prefix = _prefix(target, scheme)
     enum   = '--enumerate vp,vt,u ' if preset == 'full' else ''
     return (
         f"wpscan --url {prefix}://{target} "
         f"--no-update --format json {enum}"
         f"-o /tmp/wpscan_out.json 2>/dev/null".strip()
     )
-# ── Nuclei (profile-driven plugin manager) ────────────────────
-def build_nuclei_command(target, profile, preset='quick'):
+
+
+# ── Nuclei ────────────────────────────────────────────────────
+def build_nuclei_command(target, profile, preset='quick', scheme=None):
     """
     Uses nuclei_plugin_manager to select templates based on profile:
       Production  → critical severity only
@@ -206,7 +286,7 @@ def build_nuclei_command(target, profile, preset='quick'):
     Custom templates in AutoRed/custom_templates/ always included.
     """
     from backend.nuclei_plugin_manager import get_nuclei_flags
-    prefix = _prefix(target)
+    prefix = _prefix(target, scheme)
     flags  = get_nuclei_flags(profile)
     return (
         f"nuclei -u {prefix}://{target} "
@@ -214,8 +294,17 @@ def build_nuclei_command(target, profile, preset='quick'):
         f"-o /tmp/nuclei_out.txt "
         f"-stats -silent 2>/dev/null"
     )
+
+
 # ── Dispatcher ────────────────────────────────────────────────
-def build_command(tool, target, profile, preset='quick'):
+def build_command(tool, target, profile, preset='quick', scheme=None):
+    """
+    Build the shell command for a given tool.
+
+    scheme: optional — pass the detected scheme ('http' or 'https')
+    from run_scan() so every tool uses the same correct protocol
+    without re-probing the target for each tool.
+    """
     tool = tool.lower()
     dispatch = {
         'nmap':         build_nmap_command,
@@ -232,7 +321,9 @@ def build_command(tool, target, profile, preset='quick'):
         'nuclei':       build_nuclei_command,
     }
     fn = dispatch.get(tool)
-    return fn(target, profile, preset) if fn else None
+    return fn(target, profile, preset, scheme=scheme) if fn else None
+
+
 if __name__ == '__main__':
     import sys
     sys.path.insert(
@@ -240,7 +331,6 @@ if __name__ == '__main__':
             os.path.join(os.path.dirname(__file__), '..')
         )
     )
-    # Test with plain IP, IP:port, and domain
     targets = [
         'scanme.nmap.org',
         '192.168.112.130',
@@ -248,10 +338,14 @@ if __name__ == '__main__':
     ]
     tools = [
         'nmap', 'gobuster', 'dirsearch',
-        'wpscan', 'nuclei', 'ffuf'
+        'wpscan', 'nuclei', 'ffuf',
+        'httpx', 'whatweb', 'nikto',
     ]
     for target in targets:
-        print(f"\n===== TARGET: {target} =====")
+        scheme = detect_scheme(target)
+        print(f"\n===== TARGET: {target} (scheme: {scheme}) =====")
         for tool in tools:
-            cmd = build_command(tool, target, 'Standard', 'quick')
+            cmd = build_command(
+                tool, target, 'Standard', 'quick', scheme=scheme
+            )
             print(f"[{tool}] {cmd}")

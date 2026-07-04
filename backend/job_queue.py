@@ -54,8 +54,6 @@ def _extract_vulners_findings(scan_id, nmap_xml, target):
         re.IGNORECASE
     )
 
-    # Collect all CVEs across all ports first
-    # cve_map: { cve_id: { score, severity, ports: [], services: [] } }
     cve_map = {}
     for host in root.findall('.//host'):
         for port_el in host.findall('.//port'):
@@ -91,10 +89,9 @@ def _extract_vulners_findings(scan_id, nmap_xml, target):
     conn   = get_connection()
     cursor = conn.cursor()
     total  = 0
-    inserted_ids = []  # track new finding IDs for background enrichment
+    inserted_ids = []
 
     try:
-        # Get CVEs already in DB for this scan (from other tools)
         cursor.execute(
             "SELECT DISTINCT cve_id FROM findings "
             "WHERE scan_id=? AND cve_id IS NOT NULL",
@@ -103,7 +100,6 @@ def _extract_vulners_findings(scan_id, nmap_xml, target):
         existing_cves = {r[0] for r in cursor.fetchall()}
 
         for cve_id, info in cve_map.items():
-            # Skip if already found by another tool
             if cve_id in existing_cves:
                 print(
                     f"[*] vulners: {cve_id} already in findings "
@@ -116,7 +112,6 @@ def _extract_vulners_findings(scan_id, nmap_xml, target):
             score     = info['score']
             severity  = info['severity']
 
-            # Title: grouped if multiple ports
             if len(info['ports']) > 1:
                 title = (
                     f"{cve_id} — {svc_str} "
@@ -197,12 +192,12 @@ def _extract_vulners_findings(scan_id, nmap_xml, target):
             f"({skipped} duplicates skipped) "
             f"for scan #{scan_id}"
         )
+
     except Exception as e:
         print(f"[!] vulners extraction failed: {e}")
     finally:
         conn.close()
 
-    # ── Kick off background enrichment for new vulners findings ──
     if inserted_ids:
         from backend.enrichment_worker import enrich_and_save_async
         for fid, fdict in inserted_ids:
@@ -211,28 +206,6 @@ def _extract_vulners_findings(scan_id, nmap_xml, target):
 
 
 # ── Helper: get finding IDs inserted by a parser ─────────────
-def _get_new_finding_ids(scan_id, tool, before_count):
-    """
-    Returns a list of (id, row_dict) for findings inserted by
-    the most recent parser call, by comparing row counts before
-    and after the parse call.
-    """
-    conn   = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA table_info(findings)")
-    cols = [row[1] for row in cursor.fetchall()]
-    col_sql = ', '.join(cols)
-    cursor.execute(
-        f"SELECT {col_sql} FROM findings "
-        f"WHERE scan_id=? AND tool=? "
-        f"ORDER BY id DESC LIMIT ?",
-        (scan_id, tool, max(before_count, 50))
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(zip(cols, row)) for row in rows]
-
-
 def _count_findings(scan_id, tool):
     """Return current finding count for a scan/tool pair."""
     conn   = get_connection()
@@ -255,10 +228,9 @@ def _enrich_new_findings(scan_id, tool, count_before):
     conn   = get_connection()
     cursor = conn.cursor()
     cursor.execute("PRAGMA table_info(findings)")
-    cols = [row[1] for row in cursor.fetchall()]
+    cols    = [row[1] for row in cursor.fetchall()]
     col_sql = ', '.join(cols)
-    # Fetch the most recently inserted findings for this tool
-    # that don't yet have enriched_at set
+
     if 'enriched_at' in cols:
         cursor.execute(
             f"SELECT {col_sql} FROM findings "
@@ -267,19 +239,21 @@ def _enrich_new_findings(scan_id, tool, count_before):
             (scan_id, tool)
         )
     else:
-        # enriched_at column doesn't exist yet -- fetch all for this tool
         cursor.execute(
             f"SELECT {col_sql} FROM findings "
             f"WHERE scan_id=? AND tool=? "
             f"ORDER BY id DESC",
             (scan_id, tool)
         )
+
     rows = cursor.fetchall()
     conn.close()
+
     new_findings = [dict(zip(cols, row)) for row in rows]
     for f in new_findings:
         if f.get('id'):
             enrich_and_save_async(f['id'], f)
+
     if new_findings:
         print(
             f"[~] Queued background enrichment for "
@@ -293,10 +267,7 @@ def parse_tool_output(scan_id, tool, output, target):
         if tool == 'nmap':
             from parsers.nmap_parser import parse_nmap
             parse_nmap(scan_id, output, target)
-            # Extract CVEs from vulners script in the same XML
-            # (vulners findings are enriched inside _extract_vulners_findings)
             _extract_vulners_findings(scan_id, output, target)
-            # Enrich regular nmap findings in background
             _enrich_new_findings(scan_id, 'nmap', 0)
 
         elif tool == 'subfinder':
@@ -409,33 +380,52 @@ def parse_tool_output(scan_id, tool, output, target):
 
 # ── Scan runner ───────────────────────────────────────────────
 def run_scan(scan_id, target, profile, selected_tools, presets):
-    from backend.command_builder import build_command
+    from backend.command_builder import build_command, detect_scheme
+
     output_base = os.path.join('storage', str(scan_id))
     os.makedirs(output_base, exist_ok=True)
+
     insert_audit_log(
         scan_id, 'scan_started',
         f"Scan started for target: {target} "
         f"with profile: {profile}"
     )
+
     clear_temp_files()
+
+    # ── Detect HTTP or HTTPS once before running any tools ────
+    # This probes the target with a live request and returns
+    # 'http' or 'https' based on which protocol the target
+    # actually responds to. The result is passed to every
+    # build_command() call so all tools use the correct protocol
+    # without re-probing for each tool.
+    print(f"[*] Detecting target scheme for {target}...")
+    scheme = detect_scheme(target)
+    print(f"[+] Using scheme: {scheme}:// for all tools")
+
     results = []
     for tool in selected_tools:
         preset  = presets.get(tool, 'quick')
-        command = build_command(tool, target, profile, preset)
+        # Pass detected scheme to build_command
+        command = build_command(tool, target, profile, preset, scheme=scheme)
         if not command:
             print(f"[-] Unknown tool: {tool}, skipping.")
             continue
+
         output_dir = os.path.join(output_base, tool)
         result     = run_tool(scan_id, tool, command, output_dir)
         results.append(result)
+
         if result['status'] == 'completed':
             parse_tool_output(
                 scan_id, tool, result['stdout'], target
             )
+
     insert_audit_log(
         scan_id, 'scan_completed',
         f"Scan completed. {len(results)} tools ran."
     )
+
     conn   = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -444,6 +434,7 @@ def run_scan(scan_id, target, profile, selected_tools, presets):
     )
     conn.commit()
     conn.close()
+
     print(f"\n[+] Scan complete. Results saved to: {output_base}")
     return results
 
@@ -451,14 +442,14 @@ def run_scan(scan_id, target, profile, selected_tools, presets):
 if __name__ == '__main__':
     from backend.db import init_db, insert_scan
     init_db()
-    scan_id = insert_scan('Nuclei Test', '192.168.112.130', 'Standard')
+    scan_id = insert_scan('Scheme Detection Test', '192.168.112.130', 'Standard')
     print(f"[*] Created scan ID: {scan_id}")
     results = run_scan(
         scan_id        = scan_id,
         target         = '192.168.112.130',
         profile        = 'Standard',
-        selected_tools = ['nuclei'],
-        presets        = {'nuclei': 'quick'}
+        selected_tools = ['nuclei', 'gobuster'],
+        presets        = {'nuclei': 'quick', 'gobuster': 'quick'}
     )
     print("\n--- RESULTS SUMMARY ---")
     for r in results:
