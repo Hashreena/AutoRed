@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QGridLayout
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QPalette
 from backend.db import (
     get_connection,
     get_folders,
@@ -40,6 +40,19 @@ class CreateFolderDialog(QDialog):
         )
         self.setStyleSheet(self.get_stylesheet())
         self.init_ui()
+
+    def apply_clear_placeholder(self, line_edit):
+        """Make placeholder readable and vertically centred inside the input box."""
+        palette = line_edit.palette()
+        palette.setColor(
+            QPalette.ColorRole.PlaceholderText,
+            QColor(self.t["text"])
+        )
+        line_edit.setPalette(palette)
+        # Prevent placeholder text from being clipped by the input padding.
+        # This does not change the font size, field width, or theme colours.
+        line_edit.setTextMargins(0, 0, 0, 0)
+
     def init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 20)
@@ -62,6 +75,7 @@ class CreateFolderDialog(QDialog):
         self.name_input.setPlaceholderText(
             "e.g. Client A — VAPT"
         )
+        self.apply_clear_placeholder(self.name_input)
         layout.addWidget(self.name_input)
         desc_lbl = QLabel("Description (optional)")
         desc_lbl.setObjectName("fieldSub")
@@ -71,6 +85,7 @@ class CreateFolderDialog(QDialog):
         self.desc_input.setPlaceholderText(
             "e.g. External VAPT for Client A"
         )
+        self.apply_clear_placeholder(self.desc_input)
         layout.addWidget(self.desc_input)
         layout.addStretch()
         btn_row = QHBoxLayout()
@@ -135,17 +150,18 @@ class CreateFolderDialog(QDialog):
                 color: {t["text"]};
                 border: 1px solid {t["border"]};
                 border-radius: 8px;
-                padding: 9px 12px;
+                padding: 4px 12px;
                 font-size: {fs - 1}px;
                 selection-background-color: {t["accent"]};
                 selection-color: white;
+                placeholder-text-color: {t["text"]};
             }}
             #dialogInput:focus {{
                 border-color: {t["accent"]};
                 background-color: {t["card_bg_2"]};
             }}
             #dialogInput::placeholder {{
-                color: {t["text_soft"]};
+                color: {t["text"]};
             }}
             #secondaryBtn {{
                 background-color: {t.get("button_soft", t["card_bg"])};
