@@ -359,7 +359,6 @@ class FindingsDashboard(QWidget):
         on_finding_click=None,
         on_audit_click=None,
         on_charts_click=None,
-        on_graph_click=None,
         on_back=None,
         prefs=None,
     ):
@@ -370,7 +369,6 @@ class FindingsDashboard(QWidget):
         self.on_finding_click = on_finding_click
         self.on_audit_click = on_audit_click
         self.on_charts_click = on_charts_click
-        self.on_graph_click = on_graph_click
         self.on_back = on_back
 
         self.findings = []
@@ -492,9 +490,6 @@ class FindingsDashboard(QWidget):
         charts_action.triggered.connect(self.view_charts)
         visualize_menu.addAction(charts_action)
 
-        graph_action = QAction("View Attack Graph", self)
-        graph_action.triggered.connect(self.view_network_graph)
-        visualize_menu.addAction(graph_action)
 
         visualize_btn.setMenu(visualize_menu)
         top_card_layout.addWidget(visualize_btn)
@@ -1015,10 +1010,6 @@ class FindingsDashboard(QWidget):
             self.stop_all_workers()
             self.on_charts_click(self.scan_id)
 
-    def view_network_graph(self):
-        if self.on_graph_click:
-            self.stop_all_workers()
-            self.on_graph_click(self.scan_id)
 
     def export_pdf(self):
         path = f"storage/{self.scan_id}/report/report.pdf"

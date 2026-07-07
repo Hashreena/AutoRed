@@ -788,29 +788,6 @@ class ChartsView(QWidget):
 
         title_row.addWidget(date_pill)
 
-        export_btn = QPushButton("⬇  Export Report")
-        export_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        export_btn.setStyleSheet(
-            f"""
-            QPushButton {{
-                background: transparent;
-                color: {ACCENT_RED};
-                border: 1px solid rgba(239, 68, 68, 120);
-                border-radius: 8px;
-                padding: 7px 16px;
-                font-size: {self.fs - 2}px;
-                font-weight: 700;
-                margin-left: 8px;
-            }}
-
-            QPushButton:hover {{
-                background: {self.HOVER};
-            }}
-            """
-        )
-        export_btn.clicked.connect(self._on_export_clicked)
-
-        title_row.addWidget(export_btn)
         layout.addLayout(title_row)
 
         target = self.scan_info.get("target", "")
@@ -2912,17 +2889,6 @@ class ChartsView(QWidget):
     def go_back(self):
         if self.on_close:
             self.on_close()
-
-    def _on_export_clicked(self):
-        from PyQt6.QtWidgets import QMessageBox
-
-        QMessageBox.information(
-            self,
-            "Export Report",
-            "PDF/file export isn't built yet — "
-            "scan reports are currently sent automatically "
-            "via email when a scan completes."
-        )
 
     def _rgba(self, hex_color, alpha):
         hex_color = hex_color.lstrip("#")
