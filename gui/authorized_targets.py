@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QFrame,
     QScrollArea, QMessageBox, QInputDialog,
-    QTextEdit,
+    QTextEdit, QCheckBox,
 )
 from PyQt6.QtCore import Qt
 from gui.preferences import load_prefs, get_theme
@@ -90,6 +90,7 @@ class AuthorizedTargetsManager(QWidget):
             "card_hover",
             rgba_from_hex(self.ACCENT, 55 if not self.dark else 85)
         )
+
     def apply_theme(self, prefs):
         self.prefs = prefs
         self._set_theme_colors()
@@ -121,6 +122,7 @@ class AuthorizedTargetsManager(QWidget):
                     widget.setPlainText(value)
                 else:
                     widget.setText(value)
+
     # ─────────────────────────────────────────────
     # UI helpers
     # ─────────────────────────────────────────────
@@ -132,6 +134,7 @@ class AuthorizedTargetsManager(QWidget):
         inp.setMinimumHeight(42)
         inp.setClearButtonEnabled(True)
         return inp
+
     def _make_notes_input(self, placeholder):
         notes = QTextEdit()
         notes.setObjectName("notesField")
@@ -140,11 +143,13 @@ class AuthorizedTargetsManager(QWidget):
         notes.setMinimumHeight(72)
         notes.setMaximumHeight(90)
         return notes
+
     def _field_label(self, text):
         lbl = QLabel(text)
         lbl.setObjectName("fieldLabel")
         lbl.setWordWrap(True)
         return lbl
+
     def _add_field(self, layout, label, widget):
         field_wrap = QFrame()
         field_wrap.setObjectName("fieldWrap")
@@ -155,6 +160,7 @@ class AuthorizedTargetsManager(QWidget):
         field_layout.addWidget(widget)
         layout.addWidget(field_wrap)
         return field_wrap
+
     def _section_label(self, text, color=None):
         color = color or self.ACCENT
         lbl = QLabel(text)
@@ -169,6 +175,7 @@ class AuthorizedTargetsManager(QWidget):
             """
         )
         return lbl
+
     def _small_button_style(self, color, hover_color=None):
         hover_color = hover_color or color
         return f"""
@@ -191,6 +198,7 @@ class AuthorizedTargetsManager(QWidget):
                 color: {color};
             }}
         """
+
     # ─────────────────────────────────────────────
     # UI build
     # ─────────────────────────────────────────────
@@ -204,6 +212,7 @@ class AuthorizedTargetsManager(QWidget):
         layout = QVBoxLayout(container)
         layout.setContentsMargins(24, 22, 24, 24)
         layout.setSpacing(14)
+
         # ── Header card ─────────────────────────────
         header_card = QFrame()
         header_card.setObjectName("headerCard")
@@ -222,25 +231,30 @@ class AuthorizedTargetsManager(QWidget):
         sub.setWordWrap(True)
         header_layout.addWidget(sub)
         layout.addWidget(header_card)
+
         # ── Warning banner ──────────────────────────
         warn = QLabel(
             "⚠️  Only add targets you have written authorization to test. "
-            "Unauthorized scanning is illegal."
+            "Unauthorized scanning is illegal under Section 3 of the "
+            "Computer Crimes Act 1997 (Malaysia)."
         )
         warn.setObjectName("warningBanner")
         warn.setWordWrap(True)
         layout.addWidget(warn)
+
         # ── Add authorization form ──────────────────
         add_frame = QFrame()
         add_frame.setObjectName("formCard")
         form_layout = QVBoxLayout(add_frame)
         form_layout.setContentsMargins(16, 14, 16, 14)
         form_layout.setSpacing(10)
+
         add_title = self._section_label(
             "ADD AUTHORIZED TARGET",
             self.ACCENT
         )
         form_layout.addWidget(add_title)
+
         self.target_input = self._make_input(
             "Example: 192.168.112.130 or example.com"
         )
@@ -249,6 +263,7 @@ class AuthorizedTargetsManager(QWidget):
             "Target domain or IP address",
             self.target_input
         )
+
         self.auth_by_input = self._make_input(
             "Example: John Smith, CISO"
         )
@@ -257,6 +272,7 @@ class AuthorizedTargetsManager(QWidget):
             "Authorised by",
             self.auth_by_input
         )
+
         self.auth_email_input = self._make_input(
             "Example: authoriser@example.com"
         )
@@ -265,6 +281,7 @@ class AuthorizedTargetsManager(QWidget):
             "Authoriser email address",
             self.auth_email_input
         )
+
         self.engagement_input = self._make_input(
             "Example: Internal Lab Assessment"
         )
@@ -273,6 +290,7 @@ class AuthorizedTargetsManager(QWidget):
             "Engagement name",
             self.engagement_input
         )
+
         self.notes_input = self._make_notes_input(
             "Example: Ref SOW-2025-001, web apps only"
         )
@@ -281,42 +299,109 @@ class AuthorizedTargetsManager(QWidget):
             "Scope notes / reference",
             self.notes_input
         )
-        add_btn = QPushButton("📧  Send Authorization Request")
-        add_btn.setObjectName("primaryBtn")
-        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        add_btn.clicked.connect(self.add_authorization)
-        form_layout.addWidget(add_btn)
+
+        # ── Legal acknowledgement checkbox ──────────
+        legal_frame = QFrame()
+        legal_frame.setObjectName("legalFrame")
+        legal_layout = QHBoxLayout(legal_frame)
+        legal_layout.setContentsMargins(12, 12, 12, 12)
+        legal_layout.setSpacing(12)
+
+        self.legal_checkbox = QCheckBox()
+        self.legal_checkbox.setObjectName("legalCheckbox")
+        self.legal_checkbox.setFixedSize(22, 22)
+        self.legal_checkbox.stateChanged.connect(
+            self._on_legal_checkbox_changed
+        )
+        legal_layout.addWidget(
+            self.legal_checkbox,
+            alignment=Qt.AlignmentFlag.AlignTop
+        )
+
+        legal_text = QLabel(
+            "I confirm that I am an authorized representative of the target "
+            "organization or have obtained explicit written permission from the "
+            "target owner to conduct this security assessment. I understand that "
+            "unauthorized scanning may constitute an offence under Section 3 of "
+            "the Computer Crimes Act 1997 (Malaysia) and that I am solely "
+            "responsible for ensuring this assessment is conducted lawfully."
+        )
+        legal_text.setObjectName("legalText")
+        legal_text.setWordWrap(True)
+        legal_layout.addWidget(legal_text, 1)
+
+        form_layout.addWidget(legal_frame)
+
+        # ── Submit button (disabled until checkbox ticked) ──
+        self.add_btn = QPushButton("📧  Send Authorization Request")
+        self.add_btn.setObjectName("primaryBtnDisabled")
+        self.add_btn.setCursor(Qt.CursorShape.ForbiddenCursor)
+        self.add_btn.setEnabled(False)
+        self.add_btn.clicked.connect(self.add_authorization)
+        form_layout.addWidget(self.add_btn)
+
         layout.addWidget(add_frame)
+
         # ── Existing authorizations ─────────────────
         existing_label = self._section_label(
             "EXISTING AUTHORIZATIONS",
             self.DIM
         )
         layout.addWidget(existing_label)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setObjectName("authScroll")
         scroll.setMinimumHeight(120)
+
         self.list_widget = QWidget()
         self.list_widget.setObjectName("listWidget")
         self.list_layout = QVBoxLayout(self.list_widget)
         self.list_layout.setContentsMargins(0, 0, 0, 0)
         self.list_layout.setSpacing(8)
         self.list_layout.addStretch()
+
         scroll.setWidget(self.list_widget)
         layout.addWidget(scroll, 1)
+
         page_scroll.setWidget(container)
         self.outer.addWidget(page_scroll)
+
+    def _on_legal_checkbox_changed(self, state):
+        """Enable or disable the submit button based on checkbox state."""
+        checked = state == Qt.CheckState.Checked.value
+        self.add_btn.setEnabled(checked)
+        if checked:
+            self.add_btn.setObjectName("primaryBtn")
+            self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            self.add_btn.setObjectName("primaryBtnDisabled")
+            self.add_btn.setCursor(Qt.CursorShape.ForbiddenCursor)
+        # Force stylesheet refresh
+        self.add_btn.setStyleSheet("")
+        self.add_btn.setStyleSheet(self.get_stylesheet())
+
     # ─────────────────────────────────────────────
     # Add authorization
     # ─────────────────────────────────────────────
     def add_authorization(self):
+        # Extra safety check — button should already be disabled
+        if not self.legal_checkbox.isChecked():
+            QMessageBox.warning(
+                self,
+                "Legal Acknowledgement Required",
+                "You must confirm the legal acknowledgement before "
+                "submitting an authorization request."
+            )
+            return
+
         target = self.target_input.text().strip()
         auth_by = self.auth_by_input.text().strip()
         auth_email = self.auth_email_input.text().strip()
         engagement = self.engagement_input.text().strip()
         notes = self.notes_input.toPlainText().strip()
+
         if not target:
             QMessageBox.warning(
                 self,
@@ -346,6 +431,7 @@ class AuthorizedTargetsManager(QWidget):
                 "Please enter the engagement name."
             )
             return
+
         reply = QMessageBox.question(
             self,
             "Confirm Authorization Request",
@@ -356,12 +442,14 @@ class AuthorizedTargetsManager(QWidget):
             f"Engagement: {engagement}\n\n"
             f"The target will remain PENDING until the authorizer provides "
             f"the approval code.\n\n"
+            f"By proceeding you confirm your legal acknowledgement.\n\n"
             f"Continue?",
             QMessageBox.StandardButton.Yes |
             QMessageBox.StandardButton.No
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
+
         try:
             from backend.scope import (
                 save_authorized_target,
@@ -390,7 +478,9 @@ class AuthorizedTargetsManager(QWidget):
             self.auth_email_input.clear()
             self.engagement_input.clear()
             self.notes_input.clear()
+            self.legal_checkbox.setChecked(False)
             self.load_existing()
+
             if email_sent:
                 QMessageBox.information(
                     self,
@@ -415,6 +505,7 @@ class AuthorizedTargetsManager(QWidget):
                 "Error",
                 f"Failed to save authorization:\n{e}"
             )
+
     # ─────────────────────────────────────────────
     # Load existing authorization list
     # ─────────────────────────────────────────────
@@ -445,6 +536,7 @@ class AuthorizedTargetsManager(QWidget):
                 0,
                 self.make_auth_card(auth)
             )
+
     # ─────────────────────────────────────────────
     # Authorization card
     # ─────────────────────────────────────────────
@@ -569,6 +661,7 @@ class AuthorizedTargetsManager(QWidget):
         btn_col.addStretch()
         layout.addLayout(btn_col)
         return frame
+
     # ─────────────────────────────────────────────
     # Enter approval code
     # ─────────────────────────────────────────────
@@ -607,6 +700,7 @@ class AuthorizedTargetsManager(QWidget):
                 "Error",
                 f"Could not confirm authorization:\n{e}"
             )
+
     # ─────────────────────────────────────────────
     # Remove target
     # ─────────────────────────────────────────────
@@ -631,6 +725,7 @@ class AuthorizedTargetsManager(QWidget):
                 "Remove Failed",
                 f"Could not remove '{target}':\n{e}"
             )
+
     # ─────────────────────────────────────────────
     # Stylesheet
     # ─────────────────────────────────────────────
@@ -703,6 +798,38 @@ class AuthorizedTargetsManager(QWidget):
             #inputField::placeholder {{
                 color: {self.DIM};
             }}
+            #legalFrame {{
+                background-color: {rgba_from_hex(self.WARNING, 15)};
+                border: 1px solid {rgba_from_hex(self.WARNING, 80)};
+                border-radius: 10px;
+            }}
+            #legalText {{
+                color: {self.TEXT};
+                font-size: {fs - 2}px;
+                font-weight: 600;
+                background: transparent;
+                border: none;
+                line-height: 1.5;
+            }}
+            #legalCheckbox {{
+                background: transparent;
+                border: none;
+            }}
+            QCheckBox::indicator {{
+                width: 20px;
+                height: 20px;
+                border: 2px solid {self.WARNING};
+                border-radius: 5px;
+                background-color: {self.BG_DEEP};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {self.WARNING};
+                border-color: {self.WARNING};
+                image: none;
+            }}
+            QCheckBox::indicator:checked:after {{
+                content: "✓";
+            }}
             #primaryBtn {{
                 background-color: {self.ACCENT};
                 color: white;
@@ -717,6 +844,15 @@ class AuthorizedTargetsManager(QWidget):
             }}
             #primaryBtn:pressed {{
                 background-color: {self.ACCENT_DARK};
+            }}
+            #primaryBtnDisabled {{
+                background-color: {self.BORDER};
+                color: {self.DIM};
+                border: none;
+                border-radius: 8px;
+                padding: 10px 20px;
+                font-size: {fs}px;
+                font-weight: 900;
             }}
             #authScroll {{
                 border: none;
