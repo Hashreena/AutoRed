@@ -982,7 +982,6 @@ class MainWindow(QMainWindow):
             on_finding_click=self.show_finding_detail,
             on_audit_click=self.show_audit_log,
             on_charts_click=self.show_charts,
-            on_graph_click=self.show_network_graph,
             on_back=self.open_existing_scan,
             prefs=self.prefs,
         )
