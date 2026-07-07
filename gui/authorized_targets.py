@@ -1,3 +1,4 @@
+import re
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QFrame,
@@ -17,6 +18,28 @@ def rgba_from_hex(hex_color, alpha):
     green = int(color[2:4], 16)
     blue = int(color[4:6], 16)
     return f"rgba({red}, {green}, {blue}, {alpha})"
+
+# ── Validation patterns ───────────────────────
+_IP_PATTERN     = re.compile(r'^(\d{1,3}\.){3}\d{1,3}$')
+_DOMAIN_PATTERN = re.compile(
+    r'^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'
+)
+_EMAIL_PATTERN  = re.compile(
+    r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$'
+)
+
+def _valid_target(target):
+    """Return True if target is a valid IP or domain."""
+    if _IP_PATTERN.match(target):
+        parts = target.split('.')
+        return all(0 <= int(p) <= 255 for p in parts)
+    return bool(_DOMAIN_PATTERN.match(target))
+
+def _valid_email(email):
+    """Return True if email matches a basic valid format."""
+    return bool(_EMAIL_PATTERN.match(email))
+
+
 class AuthorizedTargetsManager(QWidget):
     def __init__(self, parent=None, prefs=None):
         super().__init__(parent)
@@ -31,6 +54,7 @@ class AuthorizedTargetsManager(QWidget):
         self.outer.setContentsMargins(0, 0, 0, 0)
         self.init_ui()
         self.load_existing()
+
     # ─────────────────────────────────────────────
     # Theme
     # ─────────────────────────────────────────────
@@ -52,22 +76,14 @@ class AuthorizedTargetsManager(QWidget):
         self.ACCENT_DARK = self.t["accent_dark"]
         self.BRAND_RED = self.t.get("brand_red", self.ACCENT)
         self.BRAND_RED_HOVER = self.t.get(
-            "brand_red_hover",
-            self.ACCENT_HOVER
+            "brand_red_hover", self.ACCENT_HOVER
         )
         self.SUCCESS = self.t["success"]
-        self.SUCCESS_HOVER = self.t.get(
-            "success_hover",
-            self.SUCCESS
-        )
+        self.SUCCESS_HOVER = self.t.get("success_hover", self.SUCCESS)
         self.WARNING = self.t["warning"]
-        self.WARNING_HOVER = self.t.get(
-            "warning_hover",
-            self.WARNING
-        )
+        self.WARNING_HOVER = self.t.get("warning_hover", self.WARNING)
         self.PENDING = self.t.get(
-            "medium",
-            "#CA8A04" if not self.dark else "#FACC15"
+            "medium", "#CA8A04" if not self.dark else "#FACC15"
         )
         self.INFO = self.t["info"]
         self.HOVER = self.t.get(
@@ -96,11 +112,8 @@ class AuthorizedTargetsManager(QWidget):
         self._set_theme_colors()
         pending = {}
         for attr in (
-            "target_input",
-            "auth_by_input",
-            "auth_email_input",
-            "engagement_input",
-            "notes_input",
+            "target_input", "auth_by_input",
+            "auth_email_input", "engagement_input", "notes_input",
         ):
             if hasattr(self, attr):
                 widget = getattr(self, attr)
@@ -213,7 +226,7 @@ class AuthorizedTargetsManager(QWidget):
         layout.setContentsMargins(24, 22, 24, 24)
         layout.setSpacing(14)
 
-        # ── Header card ─────────────────────────────
+        # ── Header card ──────────────────────────
         header_card = QFrame()
         header_card.setObjectName("headerCard")
         header_layout = QVBoxLayout(header_card)
@@ -225,14 +238,15 @@ class AuthorizedTargetsManager(QWidget):
         header_layout.addWidget(title)
         sub = QLabel(
             "Add targets that are explicitly authorized for this engagement. "
-            "An approval email will be sent to the authorizer before the target is confirmed."
+            "An approval email will be sent to the authorizer before the "
+            "target is confirmed."
         )
         sub.setObjectName("pageSub")
         sub.setWordWrap(True)
         header_layout.addWidget(sub)
         layout.addWidget(header_card)
 
-        # ── Warning banner ──────────────────────────
+        # ── Warning banner ────────────────────────
         warn = QLabel(
             "⚠️  Only add targets you have written authorization to test. "
             "Unauthorized scanning is illegal under Section 3 of the "
@@ -242,65 +256,44 @@ class AuthorizedTargetsManager(QWidget):
         warn.setWordWrap(True)
         layout.addWidget(warn)
 
-        # ── Add authorization form ──────────────────
+        # ── Add authorization form ────────────────
         add_frame = QFrame()
         add_frame.setObjectName("formCard")
         form_layout = QVBoxLayout(add_frame)
         form_layout.setContentsMargins(16, 14, 16, 14)
         form_layout.setSpacing(10)
 
-        add_title = self._section_label(
-            "ADD AUTHORIZED TARGET",
-            self.ACCENT
-        )
+        add_title = self._section_label("ADD AUTHORIZED TARGET", self.ACCENT)
         form_layout.addWidget(add_title)
 
         self.target_input = self._make_input(
             "Example: 192.168.112.130 or example.com"
         )
         self._add_field(
-            form_layout,
-            "Target domain or IP address",
-            self.target_input
+            form_layout, "Target domain or IP address", self.target_input
         )
 
-        self.auth_by_input = self._make_input(
-            "Example: John Smith, CISO"
-        )
-        self._add_field(
-            form_layout,
-            "Authorised by",
-            self.auth_by_input
-        )
+        self.auth_by_input = self._make_input("Example: John Smith, CISO")
+        self._add_field(form_layout, "Authorised by", self.auth_by_input)
 
         self.auth_email_input = self._make_input(
             "Example: authoriser@example.com"
         )
         self._add_field(
-            form_layout,
-            "Authoriser email address",
-            self.auth_email_input
+            form_layout, "Authoriser email address", self.auth_email_input
         )
 
         self.engagement_input = self._make_input(
             "Example: Internal Lab Assessment"
         )
-        self._add_field(
-            form_layout,
-            "Engagement name",
-            self.engagement_input
-        )
+        self._add_field(form_layout, "Engagement name", self.engagement_input)
 
         self.notes_input = self._make_notes_input(
             "Example: Ref SOW-2025-001, web apps only"
         )
-        self._add_field(
-            form_layout,
-            "Scope notes / reference",
-            self.notes_input
-        )
+        self._add_field(form_layout, "Scope notes / reference", self.notes_input)
 
-        # ── Legal acknowledgement checkbox ──────────
+        # ── Legal acknowledgement checkbox ────────
         legal_frame = QFrame()
         legal_frame.setObjectName("legalFrame")
         legal_layout = QHBoxLayout(legal_frame)
@@ -329,7 +322,6 @@ class AuthorizedTargetsManager(QWidget):
         legal_text.setObjectName("legalText")
         legal_text.setWordWrap(True)
         legal_layout.addWidget(legal_text, 1)
-
         form_layout.addWidget(legal_frame)
 
         # ── Submit button (disabled until checkbox ticked) ──
@@ -342,11 +334,8 @@ class AuthorizedTargetsManager(QWidget):
 
         layout.addWidget(add_frame)
 
-        # ── Existing authorizations ─────────────────
-        existing_label = self._section_label(
-            "EXISTING AUTHORIZATIONS",
-            self.DIM
-        )
+        # ── Existing authorizations ───────────────
+        existing_label = self._section_label("EXISTING AUTHORIZATIONS", self.DIM)
         layout.addWidget(existing_label)
 
         scroll = QScrollArea()
@@ -378,7 +367,6 @@ class AuthorizedTargetsManager(QWidget):
         else:
             self.add_btn.setObjectName("primaryBtnDisabled")
             self.add_btn.setCursor(Qt.CursorShape.ForbiddenCursor)
-        # Force stylesheet refresh
         self.add_btn.setStyleSheet("")
         self.add_btn.setStyleSheet(self.get_stylesheet())
 
@@ -386,7 +374,7 @@ class AuthorizedTargetsManager(QWidget):
     # Add authorization
     # ─────────────────────────────────────────────
     def add_authorization(self):
-        # Extra safety check — button should already be disabled
+        # Safety check — button should already be disabled
         if not self.legal_checkbox.isChecked():
             QMessageBox.warning(
                 self,
@@ -396,38 +384,61 @@ class AuthorizedTargetsManager(QWidget):
             )
             return
 
-        target = self.target_input.text().strip()
-        auth_by = self.auth_by_input.text().strip()
+        target     = self.target_input.text().strip()
+        auth_by    = self.auth_by_input.text().strip()
         auth_email = self.auth_email_input.text().strip()
         engagement = self.engagement_input.text().strip()
-        notes = self.notes_input.toPlainText().strip()
+        notes      = self.notes_input.toPlainText().strip()
 
+        # ── Field presence checks ─────────────────
         if not target:
             QMessageBox.warning(
-                self,
-                "Missing Target",
-                "Please enter a target domain or IP."
+                self, "Missing Target",
+                "Please enter a target domain or IP address."
             )
             return
+
+        # ── Target format validation ──────────────
+        if not _valid_target(target):
+            QMessageBox.warning(
+                self, "Invalid Target",
+                f"'{target}' is not a valid IP address or domain name.\n\n"
+                f"Valid examples:\n"
+                f"  192.168.1.1\n"
+                f"  example.com\n"
+                f"  testlab.internal\n\n"
+                f"Please enter a properly formatted target."
+            )
+            return
+
         if not auth_by:
             QMessageBox.warning(
-                self,
-                "Missing Authorization",
+                self, "Missing Authorization",
                 "Please enter who is authorizing this target."
             )
             return
+
         if not auth_email:
             QMessageBox.warning(
-                self,
-                "Missing Authorizer Email",
+                self, "Missing Authorizer Email",
                 "Please enter the authorizer's email address.\n"
                 "An approval code will be sent to them."
             )
             return
+
+        # ── Email format validation ───────────────
+        if not _valid_email(auth_email):
+            QMessageBox.warning(
+                self, "Invalid Email Address",
+                f"'{auth_email}' is not a valid email address.\n\n"
+                f"Valid example: authoriser@company.com\n\n"
+                f"Please enter a properly formatted email address."
+            )
+            return
+
         if not engagement:
             QMessageBox.warning(
-                self,
-                "Missing Engagement",
+                self, "Missing Engagement",
                 "Please enter the engagement name."
             )
             return
@@ -458,21 +469,15 @@ class AuthorizedTargetsManager(QWidget):
             )
             token = generate_token()
             save_authorized_target(
-                target,
-                auth_by,
-                engagement,
-                notes,
+                target, auth_by, engagement, notes,
                 authorizer_email=auth_email,
-                token=token,
-                status="pending"
+                token=token, status="pending"
             )
             email_sent = send_approval_email(
-                target,
-                auth_by,
-                engagement,
-                auth_email,
-                token
+                target, auth_by, engagement, auth_email, token
             )
+
+            # Clear form
             self.target_input.clear()
             self.auth_by_input.clear()
             self.auth_email_input.clear()
@@ -491,18 +496,27 @@ class AuthorizedTargetsManager(QWidget):
                     f"'Enter Approval Code' on the target to confirm it."
                 )
             else:
+                # ── Security fix: do NOT show approval code ───
+                # Showing the code here would allow self-authorization
+                # with a fake email. The code is only delivered to the
+                # authorizer's email address.
                 QMessageBox.warning(
                     self,
                     "Email Failed",
-                    f"Target saved as PENDING but the approval email could not "
-                    f"be sent to {auth_email}.\n\n"
-                    f"Check your SMTP config in .env and try sending manually.\n\n"
-                    f"Approval code: {token}"
+                    f"Authorization request could not be sent to:\n"
+                    f"  {auth_email}\n\n"
+                    f"The target has been saved as PENDING.\n\n"
+                    f"To complete authorization:\n"
+                    f"1. Fix your SMTP settings in the .env file\n"
+                    f"2. Ask the authoriser to check their email\n"
+                    f"3. Contact the authoriser directly to obtain "
+                    f"the approval code\n\n"
+                    f"The approval code is only delivered to the "
+                    f"authoriser's email address."
                 )
         except Exception as e:
             QMessageBox.critical(
-                self,
-                "Error",
+                self, "Error",
                 f"Failed to save authorization:\n{e}"
             )
 
@@ -520,9 +534,7 @@ class AuthorizedTargetsManager(QWidget):
         except Exception:
             auths = []
         if not auths:
-            empty = QLabel(
-                "No authorized targets yet. Add a target above."
-            )
+            empty = QLabel("No authorized targets yet. Add a target above.")
             empty.setObjectName("emptyText")
             self.list_layout.insertWidget(0, empty)
             return
@@ -532,18 +544,16 @@ class AuthorizedTargetsManager(QWidget):
             if target in seen:
                 continue
             seen.add(target)
-            self.list_layout.insertWidget(
-                0,
-                self.make_auth_card(auth)
-            )
+            self.list_layout.insertWidget(0, self.make_auth_card(auth))
 
     # ─────────────────────────────────────────────
     # Authorization card
     # ─────────────────────────────────────────────
     def make_auth_card(self, auth):
-        status = auth.get("status", "approved")
+        status  = auth.get("status", "approved")
         pending = status == "pending"
         border_color = self.PENDING if pending else self.SUCCESS
+
         frame = QFrame()
         frame.setObjectName("authCard")
         frame.setStyleSheet(
@@ -564,13 +574,14 @@ class AuthorizedTargetsManager(QWidget):
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(14, 10, 14, 10)
         layout.setSpacing(12)
+
         info_col = QVBoxLayout()
         info_col.setSpacing(4)
+
         header_row = QHBoxLayout()
         header_row.setSpacing(8)
-        target_lbl = QLabel(
-            f"🎯  {auth.get('target', 'Unknown')}"
-        )
+
+        target_lbl = QLabel(f"🎯  {auth.get('target', 'Unknown')}")
         target_lbl.setWordWrap(True)
         target_lbl.setStyleSheet(
             f"""
@@ -582,11 +593,8 @@ class AuthorizedTargetsManager(QWidget):
             """
         )
         header_row.addWidget(target_lbl)
-        badge_text = (
-            "⏳ Pending Approval"
-            if pending
-            else "✅ Approved"
-        )
+
+        badge_text  = "⏳ Pending Approval" if pending else "✅ Approved"
         badge_color = self.PENDING if pending else self.SUCCESS
         badge = QLabel(badge_text)
         badge.setStyleSheet(
@@ -603,6 +611,7 @@ class AuthorizedTargetsManager(QWidget):
         header_row.addWidget(badge)
         header_row.addStretch()
         info_col.addLayout(header_row)
+
         auth_lbl = QLabel(
             f"Authorized by: {auth.get('authorized_by', 'N/A')}  •  "
             f"{auth.get('engagement', 'N/A')}"
@@ -610,11 +619,11 @@ class AuthorizedTargetsManager(QWidget):
         auth_lbl.setObjectName("cardMeta")
         auth_lbl.setWordWrap(True)
         info_col.addWidget(auth_lbl)
-        date_lbl = QLabel(
-            f"Date: {auth.get('authorized_on', 'N/A')}"
-        )
+
+        date_lbl = QLabel(f"Date: {auth.get('authorized_on', 'N/A')}")
         date_lbl.setObjectName("cardMeta")
         info_col.addWidget(date_lbl)
+
         if auth.get("authorizer_email"):
             email_lbl = QLabel(
                 f"Authorizer email: {auth.get('authorizer_email')}"
@@ -622,16 +631,18 @@ class AuthorizedTargetsManager(QWidget):
             email_lbl.setObjectName("cardMeta")
             email_lbl.setWordWrap(True)
             info_col.addWidget(email_lbl)
+
         if auth.get("notes"):
-            notes_lbl = QLabel(
-                f"Notes: {auth.get('notes')}"
-            )
+            notes_lbl = QLabel(f"Notes: {auth.get('notes')}")
             notes_lbl.setObjectName("cardMeta")
             notes_lbl.setWordWrap(True)
             info_col.addWidget(notes_lbl)
+
         layout.addLayout(info_col, 1)
+
         btn_col = QVBoxLayout()
         btn_col.setSpacing(6)
+
         if pending:
             code_btn = QPushButton("🔑 Enter Approval Code")
             code_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -640,22 +651,18 @@ class AuthorizedTargetsManager(QWidget):
             )
             target_val = auth.get("target", "")
             code_btn.clicked.connect(
-                lambda _, tv=target_val:
-                self.enter_approval_code(tv)
+                lambda _, tv=target_val: self.enter_approval_code(tv)
             )
             btn_col.addWidget(code_btn)
+
         remove_btn = QPushButton("🗑️ Remove")
         remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         remove_btn.setStyleSheet(
-            self._small_button_style(
-                self.BRAND_RED,
-                self.BRAND_RED_HOVER
-            )
+            self._small_button_style(self.BRAND_RED, self.BRAND_RED_HOVER)
         )
         target_val = auth.get("target", "")
         remove_btn.clicked.connect(
-            lambda _, tv=target_val:
-            self.remove_target(tv)
+            lambda _, tv=target_val: self.remove_target(tv)
         )
         btn_col.addWidget(remove_btn)
         btn_col.addStretch()
@@ -676,10 +683,7 @@ class AuthorizedTargetsManager(QWidget):
             return
         try:
             from backend.scope import confirm_authorization
-            success, msg = confirm_authorization(
-                target,
-                code.strip()
-            )
+            success, msg = confirm_authorization(target, code.strip())
             if success:
                 QMessageBox.information(
                     self,
@@ -689,15 +693,10 @@ class AuthorizedTargetsManager(QWidget):
                 )
                 self.load_existing()
             else:
-                QMessageBox.warning(
-                    self,
-                    "Invalid Code",
-                    msg
-                )
+                QMessageBox.warning(self, "Invalid Code", msg)
         except Exception as e:
             QMessageBox.critical(
-                self,
-                "Error",
+                self, "Error",
                 f"Could not confirm authorization:\n{e}"
             )
 
@@ -721,8 +720,7 @@ class AuthorizedTargetsManager(QWidget):
             self.load_existing()
         except Exception as e:
             QMessageBox.critical(
-                self,
-                "Remove Failed",
+                self, "Remove Failed",
                 f"Could not remove '{target}':\n{e}"
             )
 
@@ -738,17 +736,13 @@ class AuthorizedTargetsManager(QWidget):
                 font-family: "Segoe UI", Arial, sans-serif;
                 font-size: {fs}px;
             }}
-            #contentRoot {{
-                background-color: {self.BG};
-            }}
+            #contentRoot {{ background-color: {self.BG}; }}
             #headerCard {{
                 background-color: {self.CARD};
                 border: 1px solid {self.BORDER};
                 border-radius: 12px;
             }}
-            #headerCard:hover {{
-                border: 1px solid {self.CARD_HOVER};
-            }}
+            #headerCard:hover {{ border: 1px solid {self.CARD_HOVER}; }}
             #pageTitle {{
                 color: {self.ACCENT};
                 font-size: {fs + 6}px;
@@ -776,9 +770,7 @@ class AuthorizedTargetsManager(QWidget):
                 border: 1px solid {self.BORDER};
                 border-radius: 12px;
             }}
-            #formCard:hover {{
-                border: 1px solid {self.CARD_HOVER};
-            }}
+            #formCard:hover {{ border: 1px solid {self.CARD_HOVER}; }}
             #inputField {{
                 background-color: {self.BG_DEEP};
                 color: {self.TEXT};
@@ -795,9 +787,7 @@ class AuthorizedTargetsManager(QWidget):
                 border-color: {self.ACCENT};
                 background-color: {self.CARD2};
             }}
-            #inputField::placeholder {{
-                color: {self.DIM};
-            }}
+            #inputField::placeholder {{ color: {self.DIM}; }}
             #legalFrame {{
                 background-color: {rgba_from_hex(self.WARNING, 15)};
                 border: 1px solid {rgba_from_hex(self.WARNING, 80)};
@@ -811,10 +801,7 @@ class AuthorizedTargetsManager(QWidget):
                 border: none;
                 line-height: 1.5;
             }}
-            #legalCheckbox {{
-                background: transparent;
-                border: none;
-            }}
+            #legalCheckbox {{ background: transparent; border: none; }}
             QCheckBox::indicator {{
                 width: 20px;
                 height: 20px;
@@ -827,9 +814,6 @@ class AuthorizedTargetsManager(QWidget):
                 border-color: {self.WARNING};
                 image: none;
             }}
-            QCheckBox::indicator:checked:after {{
-                content: "✓";
-            }}
             #primaryBtn {{
                 background-color: {self.ACCENT};
                 color: white;
@@ -839,12 +823,8 @@ class AuthorizedTargetsManager(QWidget):
                 font-size: {fs}px;
                 font-weight: 900;
             }}
-            #primaryBtn:hover {{
-                background-color: {self.ACCENT_HOVER};
-            }}
-            #primaryBtn:pressed {{
-                background-color: {self.ACCENT_DARK};
-            }}
+            #primaryBtn:hover {{ background-color: {self.ACCENT_HOVER}; }}
+            #primaryBtn:pressed {{ background-color: {self.ACCENT_DARK}; }}
             #primaryBtnDisabled {{
                 background-color: {self.BORDER};
                 color: {self.DIM};
@@ -854,13 +834,8 @@ class AuthorizedTargetsManager(QWidget):
                 font-size: {fs}px;
                 font-weight: 900;
             }}
-            #authScroll {{
-                border: none;
-                background: transparent;
-            }}
-            #authScroll QWidget {{
-                background: transparent;
-            }}
+            #authScroll {{ border: none; background: transparent; }}
+            #authScroll QWidget {{ background: transparent; }}
             QScrollBar:vertical {{
                 background: {self.BG};
                 width: 10px;
@@ -871,16 +846,10 @@ class AuthorizedTargetsManager(QWidget):
                 border-radius: 5px;
                 min-height: 28px;
             }}
-            QScrollBar::handle:vertical:hover {{
-                background: {self.ACCENT};
-            }}
+            QScrollBar::handle:vertical:hover {{ background: {self.ACCENT}; }}
             QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
-            #listWidget {{
-                background: transparent;
-            }}
+            QScrollBar::sub-line:vertical {{ height: 0px; }}
+            #listWidget {{ background: transparent; }}
             #emptyText {{
                 color: {self.DIM};
                 font-size: {fs - 1}px;
@@ -893,13 +862,8 @@ class AuthorizedTargetsManager(QWidget):
                 background: transparent;
                 border: none;
             }}
-            #pageScroll {{
-                border: none;
-                background: transparent;
-            }}
-            #pageScroll QWidget {{
-                background: transparent;
-            }}
+            #pageScroll {{ border: none; background: transparent; }}
+            #pageScroll QWidget {{ background: transparent; }}
             #fieldWrap {{
                 background: transparent;
                 border: none;
@@ -930,13 +894,8 @@ class AuthorizedTargetsManager(QWidget):
                 border-color: {self.ACCENT};
                 background-color: {self.CARD2};
             }}
-            #notesField::placeholder {{
-                color: {self.DIM};
-            }}
-            QMessageBox {{
-                background-color: {self.BG};
-                color: {self.TEXT};
-            }}
+            #notesField::placeholder {{ color: {self.DIM}; }}
+            QMessageBox {{ background-color: {self.BG}; color: {self.TEXT}; }}
             QMessageBox QLabel {{
                 color: {self.TEXT};
                 background: transparent;
@@ -953,10 +912,7 @@ class AuthorizedTargetsManager(QWidget):
             QMessageBox QPushButton:hover {{
                 background-color: {self.ACCENT_HOVER};
             }}
-            QInputDialog {{
-                background-color: {self.BG};
-                color: {self.TEXT};
-            }}
+            QInputDialog {{ background-color: {self.BG}; color: {self.TEXT}; }}
             QInputDialog QLabel {{
                 color: {self.TEXT};
                 background: transparent;
