@@ -2,7 +2,7 @@ import os
 import json
 import urllib.request
 import urllib.error
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTableWidget, QTableWidgetItem,
@@ -10,30 +10,21 @@ from PyQt6.QtWidgets import (
     QMessageBox, QMenu, QDialog, QScrollArea
 )
 from PyQt6.QtGui import QColor, QAction
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from backend.db import get_connection
 from gui.preferences import load_prefs, get_theme
-
-
 # ─────────────────────────────────────────────
 # AutoRed Theme Helpers
 # Supports Dark Theme + Light Theme from preferences.py
 # ─────────────────────────────────────────────
-
 def rgba_from_hex(hex_color, alpha):
     color = hex_color.strip().lstrip("#")
-
     if len(color) != 6:
         return f"rgba(239, 68, 68, {alpha})"
-
     red = int(color[0:2], 16)
     green = int(color[2:4], 16)
     blue = int(color[4:6], 16)
-
     return f"rgba({red}, {green}, {blue}, {alpha})"
-
-
 def _is_light_theme(theme):
     return theme.get("bg", "#020617").upper() in (
         "#F8FAFC",
@@ -42,53 +33,38 @@ def _is_light_theme(theme):
         "#EEF2F7",
         "#E2E8F0",
     ) or theme.get("text", "#E5EDF7").upper() == "#0F172A"
-
-
 BG_MAIN = "#020617"
 BG_PAGE = "#07111F"
 BG_DEEP = "#01030A"
-
 CARD_BG = "#0F172A"
 CARD_BG_2 = "#111827"
-
 BORDER = "#22304A"
 BORDER_SOFT = "#334155"
-
 TEXT_MAIN = "#E5EDF7"
 TEXT_MUTED = "#94A3B8"
 TEXT_SOFT = "#64748B"
-
 ACCENT = "#EF4444"
 ACCENT_HOVER = "#DC2626"
 ACCENT_DARK = "#991B1B"
-
 BRAND_RED = "#EF4444"
 BRAND_RED_HOVER = "#DC2626"
-
 SUCCESS = "#22C55E"
 SUCCESS_HOVER = "#16A34A"
-
 WARNING = "#F97316"
 WARNING_HOVER = "#EA580C"
-
 MEDIUM_YELLOW = "#FACC15"
 INFO_BLUE = "#60A5FA"
-
 PURPLE = "#8B5CF6"
 PURPLE_HOVER = "#7C3AED"
-
 HOVER_BG = "rgba(239, 68, 68, 25)"
 SELECTION_BG = "rgba(239, 68, 68, 35)"
 SELECTION_TEXT = "#FEE2E2"
 BUTTON_SOFT = "rgba(15, 23, 42, 205)"
 CARD_HOVER = "rgba(239, 68, 68, 75)"
-
 SEVERITY_COLORS = {}
 STATUS_COLORS = {}
 SECTION_COLORS = {}
 UNIFIED_THEME = {}
-
-
 def apply_theme_palette(theme):
     global BG_MAIN, BG_PAGE, BG_DEEP
     global CARD_BG, CARD_BG_2, BORDER, BORDER_SOFT
@@ -101,48 +77,35 @@ def apply_theme_palette(theme):
     global HOVER_BG, SELECTION_BG, SELECTION_TEXT
     global BUTTON_SOFT, CARD_HOVER
     global SEVERITY_COLORS, STATUS_COLORS, SECTION_COLORS, UNIFIED_THEME
-
     light = _is_light_theme(theme)
-
     BG_MAIN = theme.get("bg", "#F8FAFC" if light else "#020617")
     BG_PAGE = theme.get("page", theme.get("sidebar_bg", "#FFFFFF" if light else "#07111F"))
     BG_DEEP = theme.get("bg_deep", "#EEF2F7" if light else "#01030A")
-
     CARD_BG = theme.get("card_bg", "#FFFFFF" if light else "#0F172A")
     CARD_BG_2 = theme.get("card_bg_2", "#F1F5F9" if light else "#111827")
-
     BORDER = theme.get("border", "#CBD5E1" if light else "#22304A")
     BORDER_SOFT = theme.get("border_soft", "#94A3B8" if light else "#334155")
-
     TEXT_MAIN = theme.get("text", "#0F172A" if light else "#E5EDF7")
     TEXT_MUTED = theme.get("text_muted", "#475569" if light else "#94A3B8")
     TEXT_SOFT = theme.get("text_soft", "#64748B")
-
     ACCENT = theme.get("accent", "#EF4444")
     ACCENT_HOVER = theme.get("accent_hover", "#DC2626")
     ACCENT_DARK = theme.get("accent_dark", "#991B1B")
-
     BRAND_RED = theme.get("brand_red", ACCENT)
     BRAND_RED_HOVER = theme.get("brand_red_hover", ACCENT_HOVER)
-
     SUCCESS = theme.get("success", "#16A34A" if light else "#22C55E")
     SUCCESS_HOVER = theme.get("success_hover", "#15803D" if light else "#16A34A")
-
     WARNING = theme.get("warning", "#EA580C" if light else "#F97316")
     WARNING_HOVER = theme.get("warning_hover", "#C2410C" if light else "#EA580C")
-
     MEDIUM_YELLOW = theme.get("medium", "#CA8A04" if light else "#FACC15")
     INFO_BLUE = theme.get("info", "#2563EB" if light else "#60A5FA")
-
     PURPLE = theme.get("purple", "#7C3AED" if light else "#8B5CF6")
     PURPLE_HOVER = theme.get("purple_hover", "#6D28D9" if light else "#7C3AED")
-
     HOVER_BG = theme.get("hover", rgba_from_hex(ACCENT, 18 if light else 25))
     SELECTION_BG = theme.get("selection_bg", rgba_from_hex(ACCENT, 28 if light else 35))
     SELECTION_TEXT = theme.get("selection_text", "#7F1D1D" if light else "#FEE2E2")
     BUTTON_SOFT = theme.get("button_soft", "#FFFFFF" if light else "rgba(15, 23, 42, 205)")
     CARD_HOVER = theme.get("card_hover", rgba_from_hex(ACCENT, 55 if light else 75))
-
     SEVERITY_COLORS = {
         "Critical": BRAND_RED,
         "High": WARNING,
@@ -150,7 +113,6 @@ def apply_theme_palette(theme):
         "Low": SUCCESS,
         "Info": INFO_BLUE,
     }
-
     STATUS_COLORS = {
         "Confirmed": SUCCESS,
         "Dismissed": TEXT_MUTED,
@@ -159,7 +121,6 @@ def apply_theme_palette(theme):
         "Open": WARNING,
         "Remediated": SUCCESS,
     }
-
     SECTION_COLORS = {
         "SCAN OVERVIEW": INFO_BLUE,
         "OVERVIEW": INFO_BLUE,
@@ -171,7 +132,6 @@ def apply_theme_palette(theme):
         "RECOMMENDATIONS": SUCCESS,
         "REFERENCES": TEXT_MUTED,
     }
-
     UNIFIED_THEME = {
         "bg": BG_MAIN,
         "page": BG_PAGE,
@@ -199,42 +159,81 @@ def apply_theme_palette(theme):
         "info": INFO_BLUE,
         "purple": PURPLE,
     }
-
-
 apply_theme_palette(get_theme(True))
-
 _ACTIVE_WORKERS = []
+
+
+# ─────────────────────────────────────────────
+# EnrichWorker — runs concurrent enrichment for AI summary
+# Uses ThreadPoolExecutor with 3 workers for speed
+# ─────────────────────────────────────────────
+class EnrichBatchWorker(QThread):
+    """
+    Enriches a batch of findings concurrently using
+    ThreadPoolExecutor(max_workers=3).
+    Emits progress(done, total) as each finding completes.
+    Emits done(cache_dict) when all finished.
+    """
+    progress = pyqtSignal(int, int)
+    done = pyqtSignal(dict)
+
+    def __init__(self, findings_to_enrich, existing_cache):
+        super().__init__()
+        self.findings_to_enrich = findings_to_enrich
+        self.existing_cache = dict(existing_cache)
+
+    def run(self):
+        from backend.cve_enricher import enrich_finding
+        results = dict(self.existing_cache)
+        total = len(self.findings_to_enrich)
+        done_count = 0
+
+        def enrich_one(finding_tuple):
+            fid, finding_dict = finding_tuple
+            if fid in results:
+                return fid, results[fid]
+            try:
+                result = enrich_finding(finding_dict)
+                return fid, result
+            except Exception as e:
+                print(f"[!] Enrich error for {fid}: {e}")
+                return fid, {}
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = {
+                executor.submit(enrich_one, item): item
+                for item in self.findings_to_enrich
+            }
+            for future in as_completed(futures):
+                fid, result = future.result()
+                results[fid] = result
+                done_count += 1
+                self.progress.emit(done_count, total)
+
+        self.done.emit(results)
 
 
 class PreloadWorker(QThread):
     done = pyqtSignal(int, dict)
-
     def __init__(self, finding_id, finding):
         super().__init__()
-
         self.finding_id = finding_id
         self.finding = finding
-
     def run(self):
         try:
             from backend.cve_enricher import (
                 enrich_finding,
                 get_attack_path_ai,
             )
-
             result = enrich_finding(self.finding)
             nvd_best = result.get("nvd_best")
-
             attack, verify = get_attack_path_ai(
                 self.finding,
                 nvd_best
             )
-
             result["attack_path"] = attack
             result["verify_steps"] = verify
-
             self.done.emit(self.finding_id, result)
-
         except Exception as e:
             print(f"[!] Preload error for {self.finding_id}: {e}")
             self.done.emit(self.finding_id, {})
@@ -242,28 +241,20 @@ class PreloadWorker(QThread):
 
 class ExportWorker(QThread):
     """
-    Runs PDF/JSON export off the main thread. Report generation
-    now calls live CVE/CWE/MITRE/attack-path enrichment per
-    finding (see reports/report_enrichment.py), which can take a
-    noticeable amount of time for scans with many findings --
-    doing this on the UI thread would freeze the whole app for
-    that entire duration.
+    Runs PDF/JSON export off the main thread.
     """
     progress = pyqtSignal(int, int)
     done     = pyqtSignal(str)
     error    = pyqtSignal(str)
-
     def __init__(self, kind, scan_id, output_path):
         super().__init__()
         self.kind        = kind
         self.scan_id     = scan_id
         self.output_path = output_path
-
     def run(self):
         try:
             def on_progress(done, total):
                 self.progress.emit(done, total)
-
             if self.kind == 'pdf':
                 from reports.report_builder import generate_pdf
                 generate_pdf(
@@ -276,9 +267,7 @@ class ExportWorker(QThread):
                     self.scan_id, self.output_path,
                     progress_callback=on_progress
                 )
-
             self.done.emit(self.output_path)
-
         except Exception as e:
             self.error.emit(str(e))
 
@@ -286,28 +275,22 @@ class ExportWorker(QThread):
 class SummaryWorker(QThread):
     done = pyqtSignal(str)
     error = pyqtSignal(str)
-
     def __init__(self, prompt):
         super().__init__()
-
         self.prompt = prompt
-
     def run(self):
         try:
             from gui.ai_chat import (
                 load_api_key,
                 clean_markdown,
             )
-
             api_key = load_api_key()
-
             if not api_key:
                 self.error.emit(
                     "No API key found.\n"
                     "Add ANTHROPIC_API_KEY to your .env file."
                 )
                 return
-
             payload = json.dumps(
                 {
                     "model": "claude-sonnet-4-5-20250929",
@@ -320,7 +303,6 @@ class SummaryWorker(QThread):
                     ],
                 }
             ).encode("utf-8")
-
             req = urllib.request.Request(
                 "https://api.anthropic.com/v1/messages",
                 data=payload,
@@ -331,23 +313,18 @@ class SummaryWorker(QThread):
                 },
                 method="POST",
             )
-
             with urllib.request.urlopen(req, timeout=60) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 text = data["content"][0]["text"]
                 self.done.emit(clean_markdown(text))
-
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8")
-
             try:
                 err = json.loads(body)
                 msg = err.get("error", {}).get("message", str(e))
             except Exception:
                 msg = str(e)
-
             self.error.emit(f"API Error: {msg}")
-
         except Exception as e:
             self.error.emit(f"Error: {str(e)}")
 
@@ -363,43 +340,34 @@ class FindingsDashboard(QWidget):
         prefs=None,
     ):
         super().__init__()
-
         self.scan_id = scan_id
-
         self.on_finding_click = on_finding_click
         self.on_audit_click = on_audit_click
         self.on_charts_click = on_charts_click
         self.on_back = on_back
-
         self.findings = []
         self.visible_findings = []
-
         self.summary_worker = None
         self._export_worker = None
+        self._enrich_batch_worker = None
         self.enrich_cache = {}
         self.enrich_workers = []
-
         self.preload_queue = []
         self.preload_total = 0
         self.preload_done = 0
         self.active_workers = 0
         self.max_concurrent = 2
         self.queue_index = 0
-
         self.ch_rows = []
         self.current_filter = "All"
         self.filter_buttons = {}
-
         self.preload_ready = False
-
         self.prefs = prefs or load_prefs()
         self.dark = self.prefs.get("dark_mode", True)
         self.fs = self.prefs.get("font_size", 13)
         self.t = get_theme(self.dark)
         apply_theme_palette(self.t)
-
         self.setStyleSheet(self.get_stylesheet())
-
         self.init_ui()
         self.load_findings()
 
@@ -409,11 +377,8 @@ class FindingsDashboard(QWidget):
         self.fs = prefs.get("font_size", 13)
         self.t = get_theme(self.dark)
         apply_theme_palette(self.t)
-
         self.setStyleSheet(self.get_stylesheet())
-
         self.update_summary()
-
         if self.current_filter == "All":
             self.populate_table(self.findings)
         else:
@@ -423,9 +388,7 @@ class FindingsDashboard(QWidget):
                     if finding.get("severity") == self.current_filter
                 ]
             )
-
         self._update_filter_button_styles()
-
         if hasattr(self, "preload_lbl"):
             if self.preload_ready:
                 self.preload_lbl.setStyleSheet(
@@ -444,96 +407,71 @@ class FindingsDashboard(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 22, 30, 22)
         layout.setSpacing(12)
-
         top_card = QFrame()
         top_card.setObjectName("topCard")
-
         top_card_layout = QHBoxLayout(top_card)
         top_card_layout.setContentsMargins(16, 14, 16, 14)
         top_card_layout.setSpacing(10)
-
         if self.on_back:
             back_btn = QPushButton("← Back")
             back_btn.setObjectName("backBtn")
             back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             back_btn.clicked.connect(self.on_back)
             top_card_layout.addWidget(back_btn)
-
         title_col = QVBoxLayout()
         title_col.setSpacing(2)
-
         title = QLabel(f"Findings Dashboard — Scan #{self.scan_id}")
         title.setObjectName("dashTitle")
         title_col.addWidget(title)
-
         subtitle = QLabel(
             "Review detected vulnerabilities, severity distribution, and enriched intelligence."
         )
         subtitle.setObjectName("dashSub")
         title_col.addWidget(subtitle)
-
         top_card_layout.addLayout(title_col, 1)
-
         audit_btn = QPushButton("Audit Log")
         audit_btn.setObjectName("actionBtn")
         audit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         audit_btn.clicked.connect(self.view_audit_log)
         top_card_layout.addWidget(audit_btn)
-
         visualize_btn = QPushButton("Visualize ▾")
         visualize_btn.setObjectName("actionBtn")
         visualize_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-
         visualize_menu = QMenu(self)
-
         charts_action = QAction("View Charts", self)
         charts_action.triggered.connect(self.view_charts)
         visualize_menu.addAction(charts_action)
-
-
         visualize_btn.setMenu(visualize_menu)
         top_card_layout.addWidget(visualize_btn)
-
         export_btn = QPushButton("Export ▾")
         export_btn.setObjectName("actionBtn")
         export_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-
         export_menu = QMenu(self)
-
         pdf_action = QAction("Export PDF", self)
         pdf_action.triggered.connect(self.export_pdf)
         export_menu.addAction(pdf_action)
-
         json_action = QAction("Export JSON", self)
         json_action.triggered.connect(self.export_json)
         export_menu.addAction(json_action)
-
         export_btn.setMenu(export_menu)
         top_card_layout.addWidget(export_btn)
-
         ai_btn = QPushButton("✦ AI Summary")
         ai_btn.setObjectName("primaryActionBtn")
         ai_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         ai_btn.clicked.connect(self.show_ai_summary)
         top_card_layout.addWidget(ai_btn)
-
         layout.addWidget(top_card)
-
         self.summary_row = QHBoxLayout()
         self.summary_row.setSpacing(10)
         layout.addLayout(self.summary_row)
-
         filter_card = QFrame()
         filter_card.setObjectName("filterCard")
-
         filter_row = QHBoxLayout(filter_card)
         filter_row.setContentsMargins(14, 10, 14, 10)
         filter_row.setSpacing(8)
-
         filter_lbl = QLabel("Filter by severity:")
         filter_lbl.setObjectName("filterLbl")
         filter_row.addWidget(filter_lbl)
-
         for severity in [
             "All",
             "Critical",
@@ -547,12 +485,9 @@ class FindingsDashboard(QWidget):
             btn.clicked.connect(
                 lambda checked, s=severity: self.filter_table(s)
             )
-
             self.filter_buttons[severity] = btn
             filter_row.addWidget(btn)
-
         filter_row.addStretch()
-
         self.preload_lbl = QLabel("⏳ Loading intelligence...")
         self.preload_lbl.setStyleSheet(
             "color: " + TEXT_MUTED + "; font-size: " +
@@ -560,11 +495,8 @@ class FindingsDashboard(QWidget):
             "border: none;"
         )
         filter_row.addWidget(self.preload_lbl)
-
         layout.addWidget(filter_card)
-
         self._update_filter_button_styles()
-
         self.table = QTableWidget()
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels(
@@ -578,12 +510,10 @@ class FindingsDashboard(QWidget):
                 "Action",
             ]
         )
-
         self.table.horizontalHeader().setSectionResizeMode(
             4,
             QHeaderView.ResizeMode.Stretch,
         )
-
         self.table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
         )
@@ -593,18 +523,14 @@ class FindingsDashboard(QWidget):
         self.table.setObjectName("findingsTable")
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
-
         self.table.cellClicked.connect(self.on_row_click)
-
         self.table.setColumnWidth(0, 46)
         self.table.setColumnWidth(1, 105)
         self.table.setColumnWidth(2, 105)
         self.table.setColumnWidth(3, 150)
         self.table.setColumnWidth(5, 105)
         self.table.setColumnWidth(6, 60)
-
         layout.addWidget(self.table)
-
         hint = QLabel(
             "Click any row to view full finding details  •  "
             "Click 🗑️ to permanently remove a finding from this scan"
@@ -615,7 +541,6 @@ class FindingsDashboard(QWidget):
     def load_findings(self):
         conn = get_connection()
         cursor = conn.cursor()
-
         cursor.execute(
             """
             SELECT id, tool, asset, category, severity,
@@ -633,13 +558,10 @@ class FindingsDashboard(QWidget):
             """,
             (self.scan_id,),
         )
-
         self.findings = [
             dict(row) for row in cursor.fetchall()
         ]
-
         conn.close()
-
         self.update_summary()
         self.populate_table(self.findings)
         self.start_preloading()
@@ -649,18 +571,15 @@ class FindingsDashboard(QWidget):
             finding for finding in self.findings
             if finding.get("severity") in ("Critical", "High")
         ]
-
         others = [
             finding for finding in self.findings
             if finding.get("severity") not in ("Critical", "High")
         ]
-
         self.preload_queue = (priority + others)[:20]
         self.preload_total = len(self.preload_queue)
         self.preload_done = 0
         self.active_workers = 0
         self.queue_index = 0
-
         if self.preload_total == 0:
             self.preload_ready = True
             self.preload_lbl.setText("✅ No intelligence required")
@@ -670,7 +589,6 @@ class FindingsDashboard(QWidget):
                 "border: none;"
             )
             return
-
         self.launch_next_workers()
 
     def launch_next_workers(self):
@@ -680,24 +598,18 @@ class FindingsDashboard(QWidget):
         ):
             finding = self.preload_queue[self.queue_index]
             self.queue_index += 1
-
             fid = finding.get("id")
-
             worker = PreloadWorker(fid, finding)
             worker.done.connect(self.on_preload_done)
             worker.start()
-
             self.enrich_workers.append(worker)
             self.active_workers += 1
 
     def on_preload_done(self, finding_id, result):
         self.enrich_cache[finding_id] = result
-
         self.preload_done += 1
         self.active_workers -= 1
-
         remaining = self.preload_total - self.preload_done
-
         if remaining > 0:
             self.preload_lbl.setText(
                 f"⏳ Loading intelligence... "
@@ -711,19 +623,16 @@ class FindingsDashboard(QWidget):
                 str(self.fs - 3) + "px; background: transparent; "
                 "border: none;"
             )
-
         self.launch_next_workers()
 
     def _detach_worker(self, worker, signals):
         if worker is None:
             return
-
         for sig in signals:
             try:
                 getattr(worker, sig).disconnect()
             except (TypeError, RuntimeError):
                 pass
-
         try:
             if worker.isRunning():
                 _ACTIVE_WORKERS.append(worker)
@@ -739,17 +648,20 @@ class FindingsDashboard(QWidget):
     def stop_all_workers(self):
         for worker in self.enrich_workers:
             self._detach_worker(worker, ("done",))
-
         self.enrich_workers.clear()
         self.active_workers = 0
-
         if self.summary_worker:
             self._detach_worker(
                 self.summary_worker,
                 ("done", "error")
             )
             self.summary_worker = None
-
+        if self._enrich_batch_worker:
+            self._detach_worker(
+                self._enrich_batch_worker,
+                ("progress", "done")
+            )
+            self._enrich_batch_worker = None
         export_worker = getattr(self, "_export_worker", None)
         if export_worker:
             self._detach_worker(
@@ -766,7 +678,6 @@ class FindingsDashboard(QWidget):
             finding_title[:80] + "…"
             if len(finding_title) > 80 else finding_title
         )
-
         reply = QMessageBox.question(
             self,
             "Remove Finding",
@@ -779,10 +690,8 @@ class FindingsDashboard(QWidget):
             QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
-
         if reply != QMessageBox.StandardButton.Yes:
             return
-
         try:
             conn = get_connection()
             cursor = conn.cursor()
@@ -797,35 +706,28 @@ class FindingsDashboard(QWidget):
                 f"Could not remove finding:\n{e}"
             )
             return
-
         self.findings = [
             f for f in self.findings if f.get("id") != finding_id
         ]
         self.enrich_cache.pop(finding_id, None)
-
         self.update_summary()
         self.filter_table(self.current_filter)
 
     def update_summary(self):
         while self.summary_row.count():
             child = self.summary_row.takeAt(0)
-
             if child.widget():
                 child.widget().deleteLater()
-
         counts = {}
-
         for finding in self.findings:
             severity = finding.get("severity", "Info")
             counts[severity] = counts.get(severity, 0) + 1
-
         total_card = self.make_card(
             "Total",
             str(len(self.findings)),
             INFO_BLUE,
         )
         self.summary_row.addWidget(total_card)
-
         for severity, color in SEVERITY_COLORS.items():
             count = counts.get(severity, 0)
             card = self.make_card(
@@ -834,7 +736,6 @@ class FindingsDashboard(QWidget):
                 color,
             )
             self.summary_row.addWidget(card)
-
         self.summary_row.addStretch()
 
     def make_card(self, label, value, color):
@@ -846,77 +747,59 @@ class FindingsDashboard(QWidget):
             "; border-radius: 10px; min-width: 92px; max-width: 128px; } "
             "QFrame#summaryCard:hover { background-color: " + CARD_BG_2 + "; }"
         )
-
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(14, 10, 14, 10)
         card_layout.setSpacing(2)
-
         val_lbl = QLabel(value)
         val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         val_lbl.setStyleSheet(
             "color: " + color + "; font-size: " + str(self.fs + 11) +
             "px; font-weight: 900; background: transparent; border: none;"
         )
-
         lbl = QLabel(label)
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl.setStyleSheet(
             "color: " + TEXT_MUTED + "; font-size: " + str(self.fs - 2) +
             "px; font-weight: 700; background: transparent; border: none;"
         )
-
         card_layout.addWidget(val_lbl)
         card_layout.addWidget(lbl)
-
         return card
 
     def populate_table(self, findings):
         self.visible_findings = list(findings)
-
         muted = QColor(TEXT_MUTED)
         text = QColor(TEXT_MAIN)
-
         self.table.setRowCount(0)
-
         for i, finding in enumerate(self.visible_findings, 1):
             row = self.table.rowCount()
             self.table.insertRow(row)
-
             severity = finding.get("severity", "Info")
             severity_color = SEVERITY_COLORS.get(severity, TEXT_MUTED)
-
             num_item = QTableWidgetItem(str(i))
             num_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             num_item.setForeground(muted)
-
             sev_item = QTableWidgetItem(severity)
             sev_item.setForeground(QColor(severity_color))
             sev_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-
             tool_item = QTableWidgetItem(finding.get("tool", ""))
             tool_item.setForeground(text)
             tool_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-
             asset_item = QTableWidgetItem(finding.get("asset", ""))
             asset_item.setForeground(text)
-
             title_item = QTableWidgetItem(finding.get("title", ""))
             title_item.setForeground(text)
-
             status = finding.get("status", "Potential")
             status_item = QTableWidgetItem(status)
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-
             status_color = STATUS_COLORS.get(status, WARNING)
             status_item.setForeground(QColor(status_color))
-
             self.table.setItem(row, 0, num_item)
             self.table.setItem(row, 1, sev_item)
             self.table.setItem(row, 2, tool_item)
             self.table.setItem(row, 3, asset_item)
             self.table.setItem(row, 4, title_item)
             self.table.setItem(row, 5, status_item)
-
             delete_btn = QPushButton("🗑️")
             delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             delete_btn.setToolTip("Remove this finding")
@@ -928,27 +811,22 @@ class FindingsDashboard(QWidget):
                 "QPushButton:hover { background-color: " + SELECTION_BG +
                 "; border-color: " + ACCENT + "; }"
             )
-
             finding_id = finding.get("id")
             finding_title = finding.get("title", "")
             delete_btn.clicked.connect(
                 lambda _, fid=finding_id, ftitle=finding_title:
                 self.delete_finding(fid, ftitle)
             )
-
             btn_wrap = QWidget()
             btn_wrap_layout = QHBoxLayout(btn_wrap)
             btn_wrap_layout.setContentsMargins(0, 0, 0, 0)
             btn_wrap_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             btn_wrap_layout.addWidget(delete_btn)
-
             self.table.setCellWidget(row, 6, btn_wrap)
-
             self.table.setRowHeight(row, 38)
 
     def filter_table(self, severity):
         self.current_filter = severity
-
         if severity == "All":
             self.populate_table(self.findings)
         else:
@@ -957,7 +835,6 @@ class FindingsDashboard(QWidget):
                 if finding.get("severity") == severity
             ]
             self.populate_table(filtered)
-
         self._update_filter_button_styles()
 
     def _update_filter_button_styles(self):
@@ -974,7 +851,6 @@ class FindingsDashboard(QWidget):
                 "padding: 6px 13px; font-size: " + str(self.fs - 2) +
                 "px; font-weight: 900; }"
             )
-
         return (
             "QPushButton { background-color: " + BUTTON_SOFT +
             "; color: " + TEXT_MUTED + "; border: 1px solid " + BORDER +
@@ -988,7 +864,6 @@ class FindingsDashboard(QWidget):
     def on_row_click(self, row, col):
         if col == 6:
             return
-
         if (
             self.on_finding_click
             and row < len(self.visible_findings)
@@ -996,7 +871,6 @@ class FindingsDashboard(QWidget):
             finding = self.visible_findings[row]
             finding_id = finding.get("id")
             cached = self.enrich_cache.get(finding_id)
-
             self.stop_all_workers()
             self.on_finding_click(finding, cached)
 
@@ -1009,7 +883,6 @@ class FindingsDashboard(QWidget):
         if self.on_charts_click:
             self.stop_all_workers()
             self.on_charts_click(self.scan_id)
-
 
     def export_pdf(self):
         path = f"storage/{self.scan_id}/report/report.pdf"
@@ -1033,11 +906,9 @@ class FindingsDashboard(QWidget):
             "border: none; }"
         )
         progress_dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
-
         pl = QVBoxLayout(progress_dialog)
         pl.setContentsMargins(22, 22, 22, 22)
         pl.setSpacing(10)
-
         title_lbl = QLabel(
             "Generating PDF report..." if kind == 'pdf'
             else "Exporting findings to JSON..."
@@ -1047,7 +918,6 @@ class FindingsDashboard(QWidget):
             "px; font-weight: 800;"
         )
         pl.addWidget(title_lbl)
-
         status_lbl = QLabel(
             "Fetching CVE, CWE, and MITRE ATT&CK data for each "
             "finding -- this can take a moment for larger scans."
@@ -1057,22 +927,18 @@ class FindingsDashboard(QWidget):
             "color: " + TEXT_MUTED + "; font-size: " + str(self.fs - 2) + "px;"
         )
         pl.addWidget(status_lbl)
-
         progress_lbl = QLabel("Starting...")
         progress_lbl.setStyleSheet(
             "color: " + INFO_BLUE + "; font-size: " + str(self.fs - 1) +
             "px; font-weight: 700;"
         )
         pl.addWidget(progress_lbl)
-
         worker = ExportWorker(kind, self.scan_id, path)
-
         def on_progress(done, total):
             if total > 0:
                 progress_lbl.setText(f"Enriching finding {done} of {total}...")
             else:
                 progress_lbl.setText("Building report...")
-
         def on_done(output_path):
             progress_dialog.accept()
             if kind == 'pdf':
@@ -1086,27 +952,25 @@ class FindingsDashboard(QWidget):
                 msg.setWindowTitle("Export Complete")
                 msg.setText(f"JSON exported!\n\nSaved to:\n{output_path}")
                 msg.exec()
-
         def on_error(error_msg):
             progress_dialog.reject()
             QMessageBox.warning(
                 self, "Export Failed",
                 f"Could not generate the report:\n\n{error_msg}"
             )
-
         worker.progress.connect(on_progress)
         worker.done.connect(on_done)
         worker.error.connect(on_error)
-
         self._export_worker = worker
         worker.start()
-
         progress_dialog.exec()
 
+    # ─────────────────────────────────────────────
+    # AI Summary — with loading screen + concurrent enrichment
+    # ─────────────────────────────────────────────
     def show_ai_summary(self):
         conn = get_connection()
         cursor = conn.cursor()
-
         cursor.execute(
             """
             SELECT id, severity, title, description,
@@ -1123,82 +987,158 @@ class FindingsDashboard(QWidget):
             """,
             (self.scan_id,),
         )
-
         findings = cursor.fetchall()
-
         cursor.execute(
             "SELECT * FROM scans WHERE id=?",
             (self.scan_id,),
         )
-
         scan = cursor.fetchone()
-
         conn.close()
 
         counts = {
-            "Critical": 0,
-            "High": 0,
-            "Medium": 0,
-            "Low": 0,
-            "Info": 0,
+            "Critical": 0, "High": 0,
+            "Medium": 0, "Low": 0, "Info": 0,
         }
-
         for finding in findings:
             counts[finding[1]] = counts.get(finding[1], 0) + 1
 
-        ch_count = sum(
-            1 for finding in findings
-            if finding[1] in ("Critical", "High")
-        )
-
-        cached_ch = sum(
-            1 for finding in findings
-            if finding[1] in ("Critical", "High")
-            and finding[0] in self.enrich_cache
-        )
-
-        if cached_ch < ch_count:
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Intelligence Loading")
-            msg.setIcon(QMessageBox.Icon.Information)
-            msg.setText(
-                f"Intelligence is still loading "
-                f"({cached_ch}/{ch_count} Critical/High findings ready).\n\n"
-                f"The summary will take longer as missing data will be fetched now.\n\n"
-                f"Tip: wait for '✅ Intelligence ready' before clicking "
-                f"AI Summary for faster results."
-            )
-            msg.exec()
-
-        from backend.cve_enricher import enrich_finding
-
+        # Build list of Critical/High findings that need enrichment
+        needs_enrich = []
         for finding in findings:
             fid = finding[0]
             severity = finding[1]
-
             if severity not in ("Critical", "High"):
                 continue
-
             if fid not in self.enrich_cache:
-                try:
-                    finding_dict = {
-                        "id": fid,
-                        "title": finding[2],
-                        "description": finding[3] or "",
-                        "severity": severity,
-                        "asset": finding[5] or "",
-                        "tool": finding[6] or "",
-                        "evidence": finding[7] or "",
-                        "recommendation": finding[4] or "",
-                        "category": finding[8] or "",
-                    }
+                needs_enrich.append((fid, {
+                    "id": fid,
+                    "title": finding[2],
+                    "description": finding[3] or "",
+                    "severity": severity,
+                    "asset": finding[5] or "",
+                    "tool": finding[6] or "",
+                    "evidence": finding[7] or "",
+                    "recommendation": finding[4] or "",
+                    "category": finding[8] or "",
+                }))
 
-                    result = enrich_finding(finding_dict)
-                    self.enrich_cache[fid] = result
+        ch_count = sum(
+            1 for f in findings
+            if f[1] in ("Critical", "High")
+        )
 
-                except Exception as e:
-                    print(f"[!] Enrich error: {e}")
+        if needs_enrich:
+            # Show loading dialog while enrichment runs concurrently
+            self._show_enrich_loading(
+                findings, scan, counts, ch_count, needs_enrich
+            )
+        else:
+            # All cached — go straight to summary dialog
+            self._build_and_show_summary(findings, scan, counts)
 
+    def _show_enrich_loading(
+        self, findings, scan, counts, ch_count, needs_enrich
+    ):
+        """
+        Show a loading screen while EnrichBatchWorker runs
+        concurrent enrichment (3 workers). Once done, open
+        the AI summary dialog.
+        """
+        total = len(needs_enrich)
+
+        loading = QDialog(self)
+        loading.setWindowTitle("Preparing AI Summary")
+        loading.setFixedSize(480, 220)
+        loading.setWindowModality(Qt.WindowModality.ApplicationModal)
+        loading.setStyleSheet(
+            "QDialog { background: " + BG_MAIN + "; color: " +
+            TEXT_MAIN + "; } QLabel { background: transparent; border: none; }"
+        )
+
+        ll = QVBoxLayout(loading)
+        ll.setContentsMargins(32, 30, 32, 30)
+        ll.setSpacing(14)
+
+        icon_lbl = QLabel("✦")
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setStyleSheet(
+            "color: " + ACCENT + "; font-size: 36px; font-weight: 900; "
+            "background: transparent; border: none;"
+        )
+        ll.addWidget(icon_lbl)
+
+        title_lbl = QLabel("Loading Intelligence Data")
+        title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title_lbl.setStyleSheet(
+            "color: " + TEXT_MAIN + "; font-size: " + str(self.fs + 2) +
+            "px; font-weight: 900; background: transparent; border: none;"
+        )
+        ll.addWidget(title_lbl)
+
+        status_lbl = QLabel(
+            f"Fetching CVE, CWE and MITRE data for "
+            f"{total} finding(s) in parallel..."
+        )
+        status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        status_lbl.setWordWrap(True)
+        status_lbl.setStyleSheet(
+            "color: " + TEXT_MUTED + "; font-size: " + str(self.fs - 1) +
+            "px; background: transparent; border: none;"
+        )
+        ll.addWidget(status_lbl)
+
+        progress_lbl = QLabel(f"0 / {total} enriched")
+        progress_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        progress_lbl.setStyleSheet(
+            "color: " + INFO_BLUE + "; font-size: " + str(self.fs) +
+            "px; font-weight: 800; background: transparent; border: none;"
+        )
+        ll.addWidget(progress_lbl)
+
+        note_lbl = QLabel("Using 3 parallel workers for speed")
+        note_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        note_lbl.setStyleSheet(
+            "color: " + TEXT_SOFT + "; font-size: " + str(self.fs - 3) +
+            "px; background: transparent; border: none;"
+        )
+        ll.addWidget(note_lbl)
+
+        # Animate the ✦ icon
+        self._spinner_chars = ["✦", "✧", "✦", "✧"]
+        self._spinner_idx = 0
+        spinner_timer = QTimer(loading)
+        def _spin():
+            self._spinner_idx = (self._spinner_idx + 1) % 4
+            icon_lbl.setText(self._spinner_chars[self._spinner_idx])
+        spinner_timer.timeout.connect(_spin)
+        spinner_timer.start(400)
+
+        worker = EnrichBatchWorker(needs_enrich, self.enrich_cache)
+        self._enrich_batch_worker = worker
+
+        def on_progress(done, total_count):
+            progress_lbl.setText(f"{done} / {total_count} enriched")
+
+        def on_batch_done(new_cache):
+            spinner_timer.stop()
+            # Merge new results into enrich_cache
+            self.enrich_cache.update(new_cache)
+            self._enrich_batch_worker = None
+            loading.accept()
+            # Now open the actual summary dialog
+            self._build_and_show_summary(findings, scan, counts)
+
+        worker.progress.connect(on_progress)
+        worker.done.connect(on_batch_done)
+        worker.start()
+
+        loading.exec()
+
+    def _build_and_show_summary(self, findings, scan, counts):
+        """
+        Build the prompt from cached enrichment data and
+        open the AI summary dialog.
+        """
         self.ch_rows = []
         critical_high_lines = []
 
@@ -1207,61 +1147,46 @@ class FindingsDashboard(QWidget):
             severity = finding[1]
             title = finding[2]
             desc = finding[3] or ""
-
             if severity not in ("Critical", "High"):
                 continue
-
             cached = self.enrich_cache.get(fid, {})
             nvd_best = cached.get("nvd_best")
             cwe_data = cached.get("cwe_data")
             mitre = cached.get("mitre")
-
             cve_id = "N/A"
             cvss = "N/A"
             cwe = "N/A"
             mitre_id = "N/A"
-
             if nvd_best:
                 raw_cve = nvd_best.get("cve_id", "N/A")
-
                 if raw_cve and "No CVE" not in str(raw_cve):
                     cve_id = raw_cve
-
                 raw_cvss = nvd_best.get("cvss_score")
-
                 if raw_cvss:
                     cvss = str(raw_cvss)
-
             if cwe_data:
                 cwe = (
                     f"{cwe_data.get('cwe_id', 'N/A')}"
                     f" — "
                     f"{cwe_data.get('name', '')}"
                 )
-
             elif nvd_best:
                 weak = nvd_best.get("weaknesses", [])
-
                 if weak:
                     cwe = weak[0]
-
             if mitre:
                 tech_id = mitre.get("tech_id", "N/A")
                 technique = mitre.get("technique", "")
                 mitre_id = f"{tech_id} {technique}".strip()
-
-            self.ch_rows.append(
-                {
-                    "severity": severity,
-                    "title": title,
-                    "cve": cve_id,
-                    "cvss": cvss,
-                    "cwe": cwe,
-                    "mitre": mitre_id,
-                    "desc": desc[:100],
-                }
-            )
-
+            self.ch_rows.append({
+                "severity": severity,
+                "title": title,
+                "cve": cve_id,
+                "cvss": cvss,
+                "cwe": cwe,
+                "mitre": mitre_id,
+                "desc": desc[:100],
+            })
             critical_high_lines.append(
                 f"[{severity}] {title} "
                 f"| CVE: {cve_id} | CVSS: {cvss} "
@@ -1269,38 +1194,22 @@ class FindingsDashboard(QWidget):
             )
 
         critical_high_text = "\n".join(critical_high_lines)
-
         all_findings_text = "\n".join(
-            [
-                f"[{finding[1]}] {finding[2]}"
-                for finding in findings
-            ]
+            [f"[{f[1]}] {f[2]}" for f in findings]
         )
-
         references_text = ""
         seen_cves = []
-
         for finding in findings:
             fid = finding[0]
             cached = self.enrich_cache.get(fid, {})
             nvd = cached.get("nvd_best")
-
             if nvd:
                 cve = nvd.get("cve_id", "")
-
-                if (
-                    cve
-                    and "No CVE" not in cve
-                    and cve not in seen_cves
-                ):
+                if cve and "No CVE" not in cve and cve not in seen_cves:
                     seen_cves.append(cve)
-
                     desc = nvd.get("description", "")[:80]
                     nvd_url = nvd.get("nvd_url", "")
-
-                    references_text += (
-                        f"• {cve}: {nvd_url} — {desc}\n"
-                    )
+                    references_text += f"• {cve}: {nvd_url} — {desc}\n"
 
         prompt = (
             f"Analyze this security scan and respond ONLY in this exact format. "
@@ -1343,30 +1252,27 @@ class FindingsDashboard(QWidget):
             f"Do not invent CVE/CWE/MITRE identifiers."
         )
 
+        # ── Build AI summary dialog ──
         dialog = QDialog(self)
         dialog.setWindowTitle("AI Security Summary")
-        dialog.setMinimumSize(850, 650)
+        dialog.setMinimumSize(950, 700)
         dialog.setStyleSheet(
             "QDialog { background: " + BG_MAIN + "; color: " +
             TEXT_MAIN + '; font-family: "Segoe UI", Arial, sans-serif; } '
             "QLabel { background: transparent; border: none; }"
         )
-
         dl = QVBoxLayout(dialog)
         dl.setContentsMargins(24, 20, 24, 20)
         dl.setSpacing(10)
 
         header_row = QHBoxLayout()
-
         title_lbl = QLabel("✦ AI Security Summary")
         title_lbl.setStyleSheet(
             "color: " + ACCENT + "; font-size: " + str(self.fs + 5) +
             "px; font-weight: 900; background: transparent; border: none;"
         )
-
         header_row.addWidget(title_lbl)
         header_row.addStretch()
-
         dl.addLayout(header_row)
 
         info_lbl = QLabel(
@@ -1404,23 +1310,30 @@ class FindingsDashboard(QWidget):
             "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical "
             "{ height: 0; }"
         )
-
         self.scroll_widget = QWidget()
         self.scroll_widget.setStyleSheet(f"background: {BG_MAIN};")
-
         self.scroll_layout = QVBoxLayout(self.scroll_widget)
         self.scroll_layout.setContentsMargins(4, 8, 4, 8)
         self.scroll_layout.setSpacing(6)
 
-        self.waiting_lbl = QLabel(
-            "Generating AI summary... please wait ⏳"
-        )
+        self.waiting_lbl = QLabel("✦ Generating AI summary... please wait")
+        self.waiting_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.waiting_lbl.setStyleSheet(
-            "color: " + TEXT_MUTED + "; font-size: " + str(self.fs) +
+            "color: " + ACCENT + "; font-size: " + str(self.fs + 1) +
+            "px; font-weight: 800; background: transparent; border: none;"
+        )
+        self.scroll_layout.addWidget(self.waiting_lbl)
+
+        waiting_sub = QLabel(
+            "Generating AI security summary, please wait..."
+        )
+        waiting_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        waiting_sub.setWordWrap(True)
+        waiting_sub.setStyleSheet(
+            "color: " + TEXT_MUTED + "; font-size: " + str(self.fs - 1) +
             "px; background: transparent; border: none;"
         )
-
-        self.scroll_layout.addWidget(self.waiting_lbl)
+        self.scroll_layout.addWidget(waiting_sub)
         self.scroll_layout.addStretch()
 
         scroll.setWidget(self.scroll_widget)
@@ -1438,12 +1351,10 @@ class FindingsDashboard(QWidget):
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-
         close_btn = QPushButton("Close")
         close_btn.setObjectName("dialogCloseBtn")
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.clicked.connect(dialog.close)
-
         close_btn.setStyleSheet(
             "QPushButton { background: " + ACCENT + "; color: white; "
             "border: none; border-radius: 8px; padding: 9px 26px; "
@@ -1451,7 +1362,6 @@ class FindingsDashboard(QWidget):
             "QPushButton:hover { background: " + ACCENT_HOVER + "; } "
             "QPushButton:pressed { background: " + ACCENT_DARK + "; }"
         )
-
         btn_row.addWidget(close_btn)
         dl.addLayout(btn_row)
 
@@ -1462,57 +1372,39 @@ class FindingsDashboard(QWidget):
                 f"Could not generate summary:\n\n{e}"
             )
         )
-
         self.summary_worker.start()
-
         dialog.exec()
 
     def _reset_summary_scroll_layout(self):
         if not hasattr(self, "scroll_layout"):
             return
-
         while self.scroll_layout.count():
             item = self.scroll_layout.takeAt(0)
-
             if item.widget():
                 item.widget().deleteLater()
-
         self.scroll_layout.addStretch()
 
     def render_ch_table(self):
         if not self.ch_rows:
             return
-
         tbl = QTableWidget()
         tbl.setColumnCount(6)
         tbl.setHorizontalHeaderLabels(
-            [
-                "Severity",
-                "Issue",
-                "CVE",
-                "CVSS",
-                "CWE",
-                "MITRE",
-            ]
+            ["Severity", "Issue", "CVE", "CVSS", "CWE", "MITRE"]
         )
-
         tbl.horizontalHeader().setSectionResizeMode(
-            1,
-            QHeaderView.ResizeMode.Stretch,
+            1, QHeaderView.ResizeMode.Stretch,
         )
-
         tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         tbl.verticalHeader().setVisible(False)
         tbl.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
         )
-
         tbl.setColumnWidth(0, 85)
         tbl.setColumnWidth(2, 120)
         tbl.setColumnWidth(3, 65)
         tbl.setColumnWidth(4, 170)
         tbl.setColumnWidth(5, 140)
-
         tbl.setStyleSheet(
             "QTableWidget { background: " + CARD_BG +
             "; border: 1px solid " + rgba_from_hex(ACCENT, 90) +
@@ -1528,38 +1420,28 @@ class FindingsDashboard(QWidget):
             "QTableWidget::item:selected { background: " + SELECTION_BG +
             "; color: " + SELECTION_TEXT + "; }"
         )
-
         muted = QColor(TEXT_MUTED)
         text = QColor(TEXT_MAIN)
-
         for row_data in self.ch_rows:
             row = tbl.rowCount()
             tbl.insertRow(row)
-
             sev = row_data["severity"]
             color = SEVERITY_COLORS.get(sev, TEXT_MUTED)
-
             sev_item = QTableWidgetItem(sev)
             sev_item.setForeground(QColor(color))
             sev_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-
             title_item = QTableWidgetItem(row_data["title"])
             title_item.setForeground(text)
-
             cve_item = QTableWidgetItem(row_data["cve"])
             cve_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-
             if row_data["cve"] != "N/A":
                 cve_item.setForeground(QColor(INFO_BLUE))
             else:
                 cve_item.setForeground(muted)
-
             cvss_item = QTableWidgetItem(row_data["cvss"])
             cvss_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-
             try:
                 score = float(row_data["cvss"])
-
                 if score >= 9.0:
                     cvss_item.setForeground(QColor(BRAND_RED))
                 elif score >= 7.0:
@@ -1568,126 +1450,89 @@ class FindingsDashboard(QWidget):
                     cvss_item.setForeground(QColor(MEDIUM_YELLOW))
                 else:
                     cvss_item.setForeground(QColor(SUCCESS))
-
             except Exception:
                 cvss_item.setForeground(muted)
-
             cwe_item = QTableWidgetItem(row_data.get("cwe", "N/A"))
             cwe_item.setForeground(QColor(WARNING))
-
             mitre_item = QTableWidgetItem(row_data.get("mitre", "N/A"))
             mitre_item.setForeground(QColor(PURPLE))
-
             tbl.setItem(row, 0, sev_item)
             tbl.setItem(row, 1, title_item)
             tbl.setItem(row, 2, cve_item)
             tbl.setItem(row, 3, cvss_item)
             tbl.setItem(row, 4, cwe_item)
             tbl.setItem(row, 5, mitre_item)
-
             tbl.setRowHeight(row, 34)
-
         max_rows = min(len(self.ch_rows), 10)
         tbl_height = 42 + (max_rows * 35)
         tbl.setMaximumHeight(tbl_height)
-
         self.scroll_layout.insertWidget(
-            self.scroll_layout.count() - 1,
-            tbl
+            self.scroll_layout.count() - 1, tbl
         )
 
     def render_summary(self, text):
         self._reset_summary_scroll_layout()
-
         lines = text.strip().split("\n")
-
         in_ch_section = False
         ch_section_rendered = False
-
         for line in lines:
             line = line.strip()
-
             if not line:
                 spacer = QLabel("")
                 spacer.setFixedHeight(6)
-                spacer.setStyleSheet(
-                    "background: transparent; border: none;"
-                )
-
+                spacer.setStyleSheet("background: transparent; border: none;")
                 self.scroll_layout.insertWidget(
-                    self.scroll_layout.count() - 1,
-                    spacer
+                    self.scroll_layout.count() - 1, spacer
                 )
-
                 continue
-
             upper = line.upper()
-
             is_section = any(
-                upper.startswith(key)
-                for key in SECTION_COLORS
+                upper.startswith(key) for key in SECTION_COLORS
             )
-
             if is_section:
                 is_ch = any(
                     upper.startswith(key)
-                    for key in [
-                        "CRITICAL & HIGH",
-                        "CRITICAL ISSUES",
-                    ]
+                    for key in ["CRITICAL & HIGH", "CRITICAL ISSUES"]
                 )
-
                 color = TEXT_MAIN
-
                 for key, section_color in SECTION_COLORS.items():
                     if upper.startswith(key):
                         color = section_color
                         break
-
                 lbl = QLabel(line)
                 lbl.setStyleSheet(
                     "color: " + color + "; font-size: " + str(self.fs) +
                     "px; font-weight: 900; background: transparent; "
                     "border: none; margin-top: 10px;"
                 )
-
                 self.scroll_layout.insertWidget(
-                    self.scroll_layout.count() - 1,
-                    lbl
+                    self.scroll_layout.count() - 1, lbl
                 )
-
                 sec_div = QFrame()
                 sec_div.setFrameShape(QFrame.Shape.HLine)
                 sec_div.setFixedHeight(1)
                 sec_div.setStyleSheet(
                     "background: " + color + "; border: none; max-height: 1px;"
                 )
-
                 self.scroll_layout.insertWidget(
-                    self.scroll_layout.count() - 1,
-                    sec_div
+                    self.scroll_layout.count() - 1, sec_div
                 )
-
                 if is_ch:
                     in_ch_section = True
                     ch_section_rendered = False
                 else:
                     in_ch_section = False
-
             elif in_ch_section and line.startswith("•"):
                 if not ch_section_rendered:
                     self.render_ch_table()
                     ch_section_rendered = True
-
             else:
                 in_ch_section = False
-
                 lbl = QLabel(line)
                 lbl.setWordWrap(True)
                 lbl.setTextInteractionFlags(
                     Qt.TextInteractionFlag.TextSelectableByMouse
                 )
-
                 if line.startswith("•"):
                     lbl.setStyleSheet(
                         "color: " + TEXT_MAIN + "; font-size: " +
@@ -1700,15 +1545,12 @@ class FindingsDashboard(QWidget):
                         str(self.fs - 1) + "px; background: transparent; "
                         "border: none;"
                     )
-
                 self.scroll_layout.insertWidget(
-                    self.scroll_layout.count() - 1,
-                    lbl
+                    self.scroll_layout.count() - 1, lbl
                 )
 
     def get_stylesheet(self):
         fs = self.fs
-
         return (
             "QWidget { background-color: " + BG_MAIN + "; color: " +
             TEXT_MAIN + '; font-family: "Segoe UI", Arial, sans-serif; '
