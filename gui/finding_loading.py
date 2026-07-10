@@ -110,12 +110,22 @@ class FindingLoadingScreen(QWidget):
         self.card.setObjectName("loadingCard")
         self.card.setFixedWidth(720)
 
-        self.card.setStyleSheet("""
-            QFrame#loadingCard {
-                background-color: rgba(15, 23, 42, 230);
-                border: 1px solid rgba(148, 163, 184, 80);
+        card_bg = (
+            "rgba(15, 23, 42, 230)"
+            if self.dark
+            else "rgba(255, 255, 255, 240)"
+        )
+        card_border = (
+            "rgba(148, 163, 184, 80)"
+            if self.dark
+            else "rgba(203, 213, 225, 200)"
+        )
+        self.card.setStyleSheet(f"""
+            QFrame#loadingCard {{
+                background-color: {card_bg};
+                border: 1px solid {card_border};
                 border-radius: 18px;
-            }
+            }}
         """)
 
         card_layout = QVBoxLayout(self.card)
@@ -307,10 +317,17 @@ class FindingLoadingScreen(QWidget):
         w = self.width()
         h = self.height()
 
-        bg = QLinearGradient(0, 0, w, h)
-        bg.setColorAt(0.0, QColor("#020617"))
-        bg.setColorAt(0.45, QColor("#07111F"))
-        bg.setColorAt(1.0, QColor("#01030A"))
+        # Use theme background colour
+        if self.dark:
+            bg = QLinearGradient(0, 0, w, h)
+            bg.setColorAt(0.0, QColor("#020617"))
+            bg.setColorAt(0.45, QColor("#07111F"))
+            bg.setColorAt(1.0, QColor("#01030A"))
+        else:
+            bg = QLinearGradient(0, 0, w, h)
+            bg.setColorAt(0.0, QColor("#F8FAFC"))
+            bg.setColorAt(0.45, QColor("#EEF2F7"))
+            bg.setColorAt(1.0, QColor("#E2E8F0"))
         painter.fillRect(self.rect(), bg)
 
         red_glow = QRadialGradient(
@@ -334,7 +351,8 @@ class FindingLoadingScreen(QWidget):
         painter.fillRect(self.rect(), QBrush(blue_glow))
 
         # Grid
-        grid_pen = QPen(QColor(148, 163, 184, 24))
+        grid_alpha = 24 if self.dark else 40
+        grid_pen = QPen(QColor(148, 163, 184, grid_alpha))
         grid_pen.setWidth(1)
         painter.setPen(grid_pen)
 
@@ -360,8 +378,12 @@ class FindingLoadingScreen(QWidget):
             painter.drawPoint(x, y)
 
         fade = QLinearGradient(0, int(h * 0.55), 0, h)
-        fade.setColorAt(0.0, QColor(2, 6, 23, 0))
-        fade.setColorAt(1.0, QColor(2, 6, 23, 190))
+        if self.dark:
+            fade.setColorAt(0.0, QColor(2, 6, 23, 0))
+            fade.setColorAt(1.0, QColor(2, 6, 23, 190))
+        else:
+            fade.setColorAt(0.0, QColor(248, 250, 252, 0))
+            fade.setColorAt(1.0, QColor(226, 232, 240, 190))
         painter.fillRect(self.rect(), QBrush(fade))
 
     def animate_background(self):
