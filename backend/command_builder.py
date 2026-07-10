@@ -22,7 +22,6 @@ PROFILES = {
     },
 }
 
-
 def is_ip(target):
     """
     Returns True if target is an IP address (with or without port).
@@ -37,7 +36,6 @@ def is_ip(target):
     except ValueError:
         return False
 
-
 def _host(target):
     """
     Strip port from target — returns just the hostname or IP.
@@ -46,31 +44,26 @@ def _host(target):
     """
     return target.split(':')[0]
 
-
 def detect_scheme(target):
     """
     Probe the target to detect whether it responds to HTTP or HTTPS.
     Tries HTTP first, then HTTPS.
     Accepts self-signed SSL certificates (verify=False).
-
     Falls back to:
       'http'  for IP targets
       'https' for domain targets
     if neither responds within 5 seconds.
-
     Returns 'http' or 'https'.
     """
     import requests
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
     clean = (
         target
         .replace('https://', '')
         .replace('http://', '')
         .strip('/')
     )
-
     for scheme in ['http', 'https']:
         try:
             requests.get(
@@ -83,7 +76,6 @@ def detect_scheme(target):
             return scheme
         except Exception:
             continue
-
     # Neither responded — use sensible default
     default = 'http' if is_ip(target) else 'https'
     print(
@@ -91,7 +83,6 @@ def detect_scheme(target):
         f"— defaulting to {default}://"
     )
     return default
-
 
 def _prefix(target, scheme=None):
     """
@@ -103,7 +94,6 @@ def _prefix(target, scheme=None):
     if scheme:
         return scheme
     return 'http' if is_ip(target) else 'https'
-
 
 # ── Nmap (+ vulners script for CVE detection) ─────────────────
 def build_nmap_command(target, profile, preset='quick', scheme=None):
@@ -137,7 +127,6 @@ def build_nmap_command(target, profile, preset='quick', scheme=None):
             f"--open {out} {target}"
         )
 
-
 # ── Subfinder ─────────────────────────────────────────────────
 def build_subfinder_command(target, profile, preset='quick', scheme=None):
     host = _host(target)
@@ -147,18 +136,29 @@ def build_subfinder_command(target, profile, preset='quick', scheme=None):
         return f"subfinder -d {host} -silent -all"
     return f"subfinder -d {host} -silent"
 
-
-# ── httpx ─────────────────────────────────────────────────────
+# ── httpx (projectdiscovery) ──────────────────────────────────
 def build_httpx_command(target, profile, preset='quick', scheme=None):
+    """
+    Uses projectdiscovery httpx for web probing.
+    Outputs JSON with url, status_code, title and tech detection.
+    Uses ~/go/bin/httpx to ensure the correct version is called
+    instead of the system httpx (Python HTTP client).
+    """
     prefix = _prefix(target, scheme)
+    p = PROFILES[profile]
+    threads = p['threads']
+    if preset == 'full':
+        return (
+            f"~/go/bin/httpx -u {prefix}://{target} "
+            f"-json -title -tech-detect -status-code "
+            f"-content-length -follow-redirects "
+            f"-threads {threads} -silent"
+        )
     return (
-        f"curl -s -o /dev/null -w "
-        f"'{{\"url\":\"{prefix}://{target}\","
-        f"\"status_code\":%{{http_code}},"
-        f"\"title\":\"unknown\"}}' "
-        f"{prefix}://{target}"
+        f"~/go/bin/httpx -u {prefix}://{target} "
+        f"-json -title -status-code "
+        f"-threads {threads} -silent"
     )
-
 
 # ── WhatWeb ───────────────────────────────────────────────────
 def build_whatweb_command(target, profile, preset='quick', scheme=None):
@@ -169,7 +169,6 @@ def build_whatweb_command(target, profile, preset='quick', scheme=None):
         f"--log-json=/tmp/whatweb_out.json "
         f"{aggression} -q".strip()
     )
-
 
 # ── ffuf ──────────────────────────────────────────────────────
 def build_ffuf_command(target, profile, preset='quick', scheme=None):
@@ -194,7 +193,6 @@ def build_ffuf_command(target, profile, preset='quick', scheme=None):
         f"-o /tmp/ffuf_out.json -of json -s"
     )
 
-
 # ── Nikto ─────────────────────────────────────────────────────
 def build_nikto_command(target, profile, preset='quick', scheme=None):
     prefix = _prefix(target, scheme)
@@ -203,7 +201,6 @@ def build_nikto_command(target, profile, preset='quick', scheme=None):
         f"nikto -h {prefix}://{target} "
         f"{tuning}-nointeractive 2>/dev/null".strip()
     )
-
 
 # ── theHarvester ──────────────────────────────────────────────
 def build_theharvester_command(target, profile, preset='quick', scheme=None):
@@ -220,7 +217,6 @@ def build_theharvester_command(target, profile, preset='quick', scheme=None):
         f"-f /tmp/harvester_out -q"
     )
 
-
 # ── DNSrecon ──────────────────────────────────────────────────
 def build_dnsrecon_command(target, profile, preset='quick', scheme=None):
     host = _host(target)
@@ -231,7 +227,6 @@ def build_dnsrecon_command(target, profile, preset='quick', scheme=None):
         f"dnsrecon -d {host} {extra}"
         f"-j /tmp/dnsrecon_out.json".strip()
     )
-
 
 # ── Gobuster ──────────────────────────────────────────────────
 def build_gobuster_command(target, profile, preset='quick', scheme=None):
@@ -250,7 +245,6 @@ def build_gobuster_command(target, profile, preset='quick', scheme=None):
         f"-o /tmp/gobuster_out.txt -q --no-progress"
     )
 
-
 # ── Dirsearch ─────────────────────────────────────────────────
 def build_dirsearch_command(target, profile, preset='quick', scheme=None):
     prefix = _prefix(target, scheme)
@@ -264,7 +258,6 @@ def build_dirsearch_command(target, profile, preset='quick', scheme=None):
         f"--format=plain -q 2>/dev/null".strip()
     )
 
-
 # ── WPScan ────────────────────────────────────────────────────
 def build_wpscan_command(target, profile, preset='quick', scheme=None):
     prefix = _prefix(target, scheme)
@@ -274,7 +267,6 @@ def build_wpscan_command(target, profile, preset='quick', scheme=None):
         f"--no-update --format json {enum}"
         f"-o /tmp/wpscan_out.json 2>/dev/null".strip()
     )
-
 
 # ── Nuclei ────────────────────────────────────────────────────
 def build_nuclei_command(target, profile, preset='quick', scheme=None):
@@ -295,12 +287,10 @@ def build_nuclei_command(target, profile, preset='quick', scheme=None):
         f"-stats -silent 2>/dev/null"
     )
 
-
 # ── Dispatcher ────────────────────────────────────────────────
 def build_command(tool, target, profile, preset='quick', scheme=None):
     """
     Build the shell command for a given tool.
-
     scheme: optional — pass the detected scheme ('http' or 'https')
     from run_scan() so every tool uses the same correct protocol
     without re-probing the target for each tool.
@@ -322,7 +312,6 @@ def build_command(tool, target, profile, preset='quick', scheme=None):
     }
     fn = dispatch.get(tool)
     return fn(target, profile, preset, scheme=scheme) if fn else None
-
 
 if __name__ == '__main__':
     import sys
