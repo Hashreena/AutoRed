@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────
+# AutoRed — System Imports Summary
+# ─────────────────────────────────────────────────────────
+
+# ── GUI Framework ─────────────────────────────────────────
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QPushButton, QDialog, QTableWidget, QFrame,
+    QScrollArea, QMessageBox, QMenu, QCheckBox
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QColor, QAction
+
+# ── Standard Library ──────────────────────────────────────
+import os, re, json, time, subprocess
+import urllib.request, urllib.error, urllib.parse
+import smtplib, ssl
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.utils import formatdate, make_msgid
+
+# ── Data & Visualisation ──────────────────────────────────
+import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
+
+# ── PDF & Report Generation ───────────────────────────────
+from fpdf2 import FPDF
+from reportlab.lib.pagesizes import A4
+
+# ── Database ──────────────────────────────────────────────
+import sqlite3
+from backend.db import get_connection
+
+# ── CVE & Vulnerability Intelligence ─────────────────────
+from backend.cve_multi_source import lookup_cve_multi
+from backend.weakness_enrichment import get_cwe_for_finding
+from backend.cve_enricher import enrich_finding
+
+# ── HTML Parsing ──────────────────────────────────────────
+from bs4 import BeautifulSoup
+
+# ── Environment & Configuration ───────────────────────────
+from dotenv import load_dotenv
+
+# ── XML Parsing ───────────────────────────────────────────
+import defusedxml.ElementTree as ET
+
+# ── Cryptography & Security ───────────────────────────────
+import cryptography
+import joblib
